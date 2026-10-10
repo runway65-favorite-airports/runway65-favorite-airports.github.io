@@ -109,3 +109,9 @@ td{padding:12px 10px 12px 0;border-top:1px solid var(--line-2);vertical-align:to
   .tl .ev{grid-template-columns:70px 20px 1fr;gap:0 10px}
   .homes{grid-template-columns:1fr}
 }
+
+.site-foot{max-width:1180px;margin:0 auto;padding:0 24px 28px;color:var(--ink-2);font-size:13px}
+.doc{max-width:720px}
+.doc h2{margin:28px 0 8px}
+.doc p,.doc li{max-width:68ch}
+.doc ul{padding-left:20px}

@@ -167,7 +167,7 @@
         var picker = new google.picker.PickerBuilder()
           .addView(mine).addView(shared)
           .setOAuthToken(state.token).setDeveloperKey(C.API_KEY).setAppId(C.PROJECT_NUMBER)
-          .setTitle('Choose the Retirement Home Listings sheet')
+          .setTitle('Choose your planning sheet')
           .setCallback(function (d) {
             if (d.action === google.picker.Action.PICKED) resolve({ id: d.docs[0].id, name: d.docs[0].name });
             else if (d.action === google.picker.Action.CANCEL) resolve(null);
@@ -185,12 +185,17 @@
       var id = r['Home ID'];
       return {
         id: id, builder: r['Builder'] || '', model: r['Model'] || '', community: r['Community'] || '', city: r['City'] || '',
-        status: r['Status'] || 'Unknown', price: num(r['List Price']), upgrade: num(r['Upgrade Price']), sqft: num(r['Sq Ft']),
+        status: canonStatus(r['Status']), price: num(r['List Price']), upgrade: num(r['Upgrade Price']), sqft: num(r['Sq Ft']),
         visit: r['Visit Date'] || '', reason: r['Rejected Reason'] || '', url: r['Listing URL'] || '', address: r['Address'] || '',
         notes: r['Notes'] || '', contact: r['Contact'] || '', phone: r['Tel. #'] || '',
         tour: (tours[id] || [])[0] || null, contacts: contacts[id] || []
       };
     });
+  }
+  function canonStatus(s) {
+    var k = String(s || '').trim().toLowerCase();
+    for (var i = 0; i < STATUS_ORDER.length; i++) if (STATUS_ORDER[i].toLowerCase() === k) return STATUS_ORDER[i];
+    return String(s || '').trim() || 'Unknown';
   }
   function homeName(x) { return (x.builder + (x.model ? ': ' + x.model : '')).trim() || x.id; }
 
@@ -250,7 +255,7 @@
 
   function viewOverview() {
     var d = state.data, homes = d.homes;
-    var target = new Date(C.RETIREMENT_DATE + 'T00:00:00Z');
+    var target = new Date(C.TARGET_DATE + 'T00:00:00Z');
     var days = Math.ceil((target - Date.now()) / 864e5);
     var months = Math.max(0, Math.round(days / 30.44));
     var label = target.toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
@@ -265,12 +270,12 @@
     var follow = d.contacts.filter(function (c) { return /^y/i.test(col(c, /^action required/i)); });
 
     return h('div', { class: 'stack' },
-      h('div', null, h('h1', null, 'Overview'), h('p', { class: 'lede' }, 'Where the road to retirement stands today.')),
+      h('div', null, h('h1', null, 'Overview'), h('p', { class: 'lede' }, 'Where things stand today.')),
       h('div', { class: 'row' },
         h('section', { class: 'card hero stack' },
-          h('div', { class: 'small' }, 'Retirement from ATPCO'),
+          h('div', { class: 'small' }, 'Target date'),
           h('div', { class: 'big' }, label),
-          h('div', null, days > 0 ? 'About ' + months + (months === 1 ? ' month' : ' months') + ' to go (' + days + ' days)' : 'Your retirement date has arrived.')
+          h('div', null, days > 0 ? 'About ' + months + (months === 1 ? ' month' : ' months') + ' to go (' + days + ' days)' : 'The target date has arrived.')
         ),
         h('section', { class: 'card col stack' },
           h('h2', null, 'Housing at a glance'),
@@ -375,8 +380,8 @@
       ev.push({ date: dt, tag: 'Contact', title: c['Subject'] || 'Contact',
         detail: [c['Contact Name'], c['Builder']].filter(Boolean).join(', ') + (c['Summary'] ? ': ' + c['Summary'] : '') });
     });
-    var target = new Date(C.RETIREMENT_DATE + 'T00:00:00');
-    ev.push({ date: target, tag: 'Milestone', title: 'Retirement from ATPCO begins', detail: '' });
+    var target = new Date(C.TARGET_DATE + 'T00:00:00');
+    ev.push({ date: target, tag: 'Milestone', title: 'Target date', detail: '' });
     ev.sort(function (a, b) { return a.date - b.date; });
     var now = new Date(), rows = [], placed = false;
     function row(e, kind) {
@@ -441,17 +446,17 @@
   function screenSignIn() {
     return h('div', { class: 'center' }, h('div', { class: 'box' },
       h('div', { class: 'brand' }, logo(), 'Runway'),
-      h('h1', null, 'One shared plan for the road to June 2027.'),
-      h('p', { class: 'muted' }, 'Sign in with the Google account Steve shared Runway with. Runway reads only the sheet you choose.'),
+      h('h1', null, 'One shared plan for what comes next.'),
+      h('p', { class: 'muted' }, 'Sign in with the Google account the owner shared Runway with. Runway reads only the sheet you choose.'),
       h('button', { class: 'btn', type: 'button', onclick: function () { doSignIn(''); } }, 'Continue with Google'),
       errorBox(),
-      h('p', { class: 'muted small' }, 'Private. Invitation only.')));
+      h('p', { class: 'muted small' }, 'Private. Invitation only. ', h('a', { href: 'privacy.html' }, 'Privacy policy'))));
   }
   function screenChoose() {
     return h('div', { class: 'center' }, h('div', { class: 'box' },
       h('div', { class: 'brand' }, logo(), 'Runway'),
       h('h1', null, 'Choose your sheet'),
-      h('p', { class: 'muted' }, 'Pick the Retirement Home Listings sheet once. Runway remembers the choice on this device and can open only that file.'),
+      h('p', { class: 'muted' }, 'Pick your planning sheet once. Runway remembers the choice on this device and can open only that file.'),
       h('button', { class: 'btn', type: 'button', onclick: doPick }, 'Choose sheet'),
       errorBox(),
       h('button', { class: 'btn ghost small', type: 'button', onclick: doSignOut }, 'Sign out')));
@@ -465,7 +470,7 @@
     var banner = null;
     if (state.role === 'viewer') {
       banner = h('div', { class: 'banner', role: 'status' }, h('div', { class: 'in' },
-        h('strong', null, 'View only.'), h('span', null, 'You\'re signed in as ' + name + '. You can see everything in Runway. Only Steve and Kam can make changes.'),
+        h('strong', null, 'View only.'), h('span', null, 'You\'re signed in as ' + name + '. You can see everything in Runway. Only the sheet\'s owner and editors can make changes.'),
         h('span', { class: 'pill' }, 'Role: viewer')));
     } else if (state.role === 'unknown') {
       banner = h('div', { class: 'banner', role: 'status' }, h('div', { class: 'in' },
@@ -486,7 +491,8 @@
     var content = state.error ? errorBox() : (state.data ? ROUTES[state.route][1]() : null);
     var foot = h('div', { class: 'foot' },
       state.loadedAt ? 'Loaded ' + state.loadedAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) + '. ' : '',
-      'This version is read-only. Make changes in the sheet or its Forms.',
+      'This version is read-only. Make changes in the sheet or its Forms. ',
+      h('a', { href: 'privacy.html' }, 'Privacy policy'),
       state.sheet && state.sheet.id ? [' ', h('a', { href: 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(state.sheet.id) + '/edit', target: '_blank', rel: 'noopener noreferrer' }, 'Open the sheet')] : null);
     return h('div', null, banner, top, h('main', null, content), foot);
   }

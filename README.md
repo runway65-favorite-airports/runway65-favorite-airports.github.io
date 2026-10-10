@@ -11,21 +11,21 @@ Read-only first version. Shows Overview, Housing, Chronology and Documents from 
 ## Upload to GitHub (through a pull request, because `main` is protected)
 
 1. In the `runway65-favorite-airports.github.io` repository, choose Add file > Upload files.
-2. Upload all five files from this folder: `index.html`, `app.js`, `styles.css`, `config.js`, `README.md`.
+2. Upload all six files from this folder: `index.html`, `app.js`, `styles.css`, `config.js`, `privacy.html`, `README.md`.
 3. Choose "Create a new branch and start a pull request", then merge it yourself.
 4. Wait a minute, then open `https://runway65-favorite-airports.github.io`.
 
 ## First run
 
 1. Choose **Continue with Google** and sign in. While the Google app is in Testing, only accounts on the Test users list can sign in.
-2. Choose **Choose sheet** and pick *Retirement Home Listings*. Runway remembers the choice on that device.
+2. Choose **Choose sheet** and pick your planning sheet. Runway remembers the choice on that device.
 3. Check each page: Overview, Housing, Chronology, Documents.
 
 ## Test with all three accounts
 
-- Steve: should see "Role: editor".
-- Kam (iPhone and iPad, in Safari): should see "Role: editor". Each device needs its own sheet choice the first time.
-- Daniel: should see the "View only" banner.
+- The owner: should see "Role: editor".
+- An editor on iPhone and iPad (Safari): should see "Role: editor". Each device needs its own sheet choice the first time.
+- A viewer: should see the "View only" banner.
 
 ## If sign-in or the file chooser does not appear
 
@@ -47,3 +47,11 @@ Each tab needs a header row and a `Home ID` column. Runway reads columns by head
 - Only the chosen sheet's id and name are saved in the browser. Neither is secret.
 - Sheet text is always inserted as plain text, and links are limited to http and https.
 - Never put a client secret, a token, sheet contents or account numbers in this repository.
+
+## Keep the public repository free of personal details
+
+The site and its code are public. They contain no names, employer, family details or sheet contents, and should stay that way. `config.js` holds a target date only.
+
+## Google consent screen links
+
+In Google Auth Platform > Branding, set the home page to `https://runway65-favorite-airports.github.io/` and the privacy policy link to `https://runway65-favorite-airports.github.io/privacy.html`.
