@@ -6,5 +6,5 @@ window.RUNWAY_CONFIG = {
   CLIENT_ID: '678144968114-7hjqrkj8tislnmkkcsph3qgoj40r3e29.apps.googleusercontent.com',
   API_KEY: 'AIzaSyA9WJrPzpUYaombpE5o9H7G3QP81C_21kQ',
   PROJECT_NUMBER: '678144968114',
-  RETIREMENT_DATE: '2027-06-01'
+  TARGET_DATE: '2027-06-01'
 };
