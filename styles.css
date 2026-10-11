@@ -136,3 +136,10 @@ details>summary{cursor:pointer;font-weight:600;color:var(--teal);min-height:44px
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);
   padding:12px 18px;border-radius:12px;font-weight:600;max-width:90vw;z-index:10;box-shadow:0 6px 24px rgba(0,0,0,.25)}
 .toast.bad{background:var(--danger-bg);color:var(--danger-ink)}
+
+/* v0.9.0: rejection reasons */
+.reasons{border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:0;min-width:0}
+.reasons[hidden]{display:none}
+.reasons legend{font-size:14px;font-weight:600;color:var(--ink-2);padding:0 6px}
+.reasons label{display:flex;gap:10px;align-items:center;min-height:40px;font-size:15px}
+.reasons input{width:22px;height:22px;accent-color:var(--teal);flex:none;margin:0}

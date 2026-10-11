@@ -1,13 +1,13 @@
-/* Runway v0.8.0.
+/* Runway v0.9.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, Chronology, Journal and Documents.
-   - Editors (by Google's sharing settings) can check off tasks, add tasks, decisions and journal entries, and change a home's status.
+   - Editors (by Google's sharing settings) can check off tasks, add tasks, decisions and journal entries, and change a home's status and pick why a home was rejected.
    Sheet text is always inserted as text (never as HTML). */
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.8.0';
+  var APP_VERSION = '0.9.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var HOME_KEY = 'runway.sheet'; // only a sheet's id and name are stored; neither is secret
@@ -15,6 +15,8 @@
   var TABS = { listing: 'Home Listing', tours: 'Home Tour Notes', contacts: 'Contacts Log' };
   var DOCS_TAB = 'Documents & Links';
   var PLAN_TABS = { tasks: 'Tasks', decisions: 'Decisions', streams: 'Workstreams' };
+  // Same list as the Rejected Reason question in the Home Listing Form.
+  var REASONS = ['No enclosed WC', 'Small lots', 'Limited lot selection', 'Build quality or reviews', 'Flooring or finishes', 'Layout', 'No models available', 'Over budget', 'Other (explain in Notes)'];
   var STATUS_ORDER = ['Active', 'To tour', 'Researching', 'Toured', 'Rejected', 'Purchased'];
 
   var state = {
@@ -25,6 +27,10 @@
   };
 
   var app = document.getElementById('app');
+  if (window.top !== window.self) {
+    app.textContent = 'Runway cannot be shown inside another page. Open it directly in your browser.';
+    return;
+  }
 
   /* ---------- small helpers ---------- */
   function loadStore(key) {
@@ -40,6 +46,11 @@
     var s = ''; i++;
     while (i > 0) { var m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); }
     return s;
+  }
+  // Text typed in the app must never be read by Sheets as a formula (a leading apostrophe forces plain text).
+  function safeText(v) {
+    var t = String(v === null || v === undefined ? '' : v);
+    return /^[=+\-@\t\r]/.test(t) ? "'" + t : t;
   }
   function pad(n, w) { var s = String(n); while (s.length < w) s = '0' + s; return s; }
   function todayText() { return new Date().toLocaleDateString('en-US'); }
@@ -339,9 +350,9 @@
   }
   function cell(tab, head, name, row, value) {
     var i = head.indexOf(name);
-    return i < 0 ? null : { range: "'" + tab + "'!" + colLetter(i) + row, values: [[value]] };
+    return i < 0 ? null : { range: "'" + tab + "'!" + colLetter(i) + row, values: [[safeText(value)]] };
   }
-  function rowFrom(head, obj) { return head.map(function (k) { return obj[k] === undefined ? '' : obj[k]; }); }
+  function rowFrom(head, obj) { return head.map(function (k) { return obj[k] === undefined ? '' : safeText(obj[k]); }); }
   function nextId(items, prefix) {
     var max = 0;
     items.forEach(function (x) { var m = String(x.id).match(/(\d+)$/); if (m) max = Math.max(max, +m[1]); });
@@ -371,16 +382,25 @@
   }
   function canEditHome() { return state.role === 'editor'; }
   function homeBase() { return 'https://sheets.googleapis.com/v4/spreadsheets/' + enc(state.sheet.id); }
-  function setHomeStatus(x, status) {
-    var head = state.data.listingHead, iS = head.indexOf('Status'), iId = head.indexOf('Home ID');
+  function splitReasons(text) {
+    return String(text || '').split(',').map(function (t) { return t.trim(); }).filter(Boolean);
+  }
+  function setHomeStatus(x, status, reasons) {
+    var head = state.data.listingHead, iS = head.indexOf('Status'), iId = head.indexOf('Home ID'), iR = head.indexOf('Rejected Reason');
     if (iS < 0 || iId < 0) return Promise.reject(new Error('The Home Listing tab needs Status and Home ID columns.'));
     if (STATUS_ORDER.indexOf(status) < 0) return Promise.reject(new Error('Choose one of the standard statuses.'));
+    var rejected = status === 'Rejected';
+    reasons = rejected ? (reasons || []) : [];
+    if (rejected && !reasons.length) return Promise.reject(new Error('Pick at least one reason for the rejection.'));
+    if (reasons.some(function (r) { return REASONS.indexOf(r) < 0; })) return Promise.reject(new Error('Choose reasons from the list.'));
+    var reasonText = reasons.join(', ');
     return api(homeBase() + '/values/' + enc("'Home Listing'!" + colLetter(iId) + x.row)).then(function (j) {
       var v = j.values && j.values[0] ? String(j.values[0][0]).trim() : '';
       if (v !== x.id) throw new Error('The sheet changed since it was loaded. Runway refreshed it. Please try again.');
-      return api(homeBase() + '/values:batchUpdate', { method: 'POST', body: { valueInputOption: 'USER_ENTERED',
-        data: [{ range: "'Home Listing'!" + colLetter(iS) + x.row, values: [[status]] }] } });
-    }).then(function () { x.status = status; });
+      var data = [{ range: "'Home Listing'!" + colLetter(iS) + x.row, values: [[safeText(status)]] }];
+      if (iR >= 0) data.push({ range: "'Home Listing'!" + colLetter(iR) + x.row, values: [[safeText(reasonText)]] });
+      return api(homeBase() + '/values:batchUpdate', { method: 'POST', body: { valueInputOption: 'USER_ENTERED', data: data } });
+    }).then(function () { x.status = status; if (state.data.listingHead.indexOf('Rejected Reason') >= 0) x.reason = reasonText; });
   }
   function addJournal(f) {
     var P = state.planData;
@@ -687,10 +707,22 @@
     var options = STATUS_ORDER.slice();
     if (options.indexOf(x.status) < 0) options.unshift(x.status);
     var sel = h('select', { 'aria-label': 'Status for ' + homeName(x) }, options.map(function (o) { return h('option', { value: o, selected: o === x.status ? true : null }, o); }));
-    return h('div', { class: 'stack', style: 'gap:8px' }, field('Change status', sel),
+    var current = splitReasons(x.reason);
+    var boxes = REASONS.map(function (r) {
+      return h('input', { type: 'checkbox', value: r, checked: current.indexOf(r) >= 0 ? true : null, 'aria-label': r });
+    });
+    var group = h('fieldset', { class: 'reasons', hidden: sel.value === 'Rejected' ? null : true },
+      h('legend', null, 'Why was it rejected? Pick all that apply.'),
+      REASONS.map(function (r, i) { return h('label', null, boxes[i], r); }));
+    sel.addEventListener('change', function () { group.hidden = sel.value !== 'Rejected'; });
+    function chosen() { return boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; }); }
+    return h('div', { class: 'stack', style: 'gap:8px' }, field('Change status', sel), group,
+      sel.value !== 'Rejected' && current.length ? h('p', { class: 'muted small' }, 'Changing a rejected home to another status clears its reason.') : null,
       h('button', { class: 'btn small', type: 'button', style: 'align-self:flex-start', disabled: state.saving ? true : null, onclick: function () {
-        if (sel.value === x.status) { toast('That is already the status.', true); return; }
-        save(setHomeStatus(x, sel.value), 'Status updated to ' + sel.value);
+        var picked = chosen();
+        var same = sel.value === x.status && (sel.value !== 'Rejected' || picked.slice().sort().join('|') === current.slice().sort().join('|'));
+        if (same) { toast('Nothing has changed.', true); return; }
+        save(setHomeStatus(x, sel.value, picked), sel.value === 'Rejected' ? 'Rejected, with reasons saved' : 'Status updated to ' + sel.value);
       } }, 'Save status'));
   }
   function homeCard(x) {
@@ -832,6 +864,7 @@
       if (!placed && e.date > now) { rows.push(row({ date: now }, 'today')); placed = true; }
       rows.push(row(e, e.date > now ? 'future' : ''));
     });
+    if (!placed) rows.push(row({ date: now }, 'today'));
     return h('div', { class: 'stack' },
       pageHead('Chronology', 'The journey in order: tours, builder contacts, finished tasks, decisions and journal entries.'),
       h('section', { class: 'card' }, h('div', { class: 'tl' }, rows)));
