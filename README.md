@@ -1,6 +1,6 @@
 # Runway
 
-Read-only first version. Shows Overview, Housing, Chronology and Documents from one Google Sheet.
+Version 0.3.0. Shows Overview, Tasks, Decisions, Housing, Chronology and Documents from two Google Sheets. People with edit access can check off tasks and add tasks and decisions. Housing stays read-only.
 
 ## Before you upload
 
@@ -11,7 +11,7 @@ Read-only first version. Shows Overview, Housing, Chronology and Documents from 
 ## Upload to GitHub (through a pull request, because `main` is protected)
 
 1. In the `runway65-favorite-airports.github.io` repository, choose Add file > Upload files.
-2. Upload all six files from this folder: `index.html`, `app.js`, `styles.css`, `config.js`, `privacy.html`, `README.md`.
+2. Upload all the files from this folder: `index.html`, `app.js`, `styles.css`, `config.js`, `privacy.html`, `README.md`, `CHANGELOG.md`.
 3. Choose "Create a new branch and start a pull request", then merge it yourself.
 4. Wait a minute, then open `https://runway65-favorite-airports.github.io`.
 
@@ -36,10 +36,18 @@ The page has a Content Security Policy in `index.html` that allows only Google's
 Tab names, exactly: `Home Listing`, `Home Tour Notes`, `Contacts Log`, and optionally `Documents & Links`.
 Each tab needs a header row and a `Home ID` column. Runway reads columns by header name, so column order does not matter.
 
+## The Runway planning sheet
+
+Tasks and Decisions live in a second Google Sheet. Create it from `Runway_Planning_Sheet_Template.xlsx`, share it as Restricted (owner, editors, viewers), then choose it in Runway under Sheets.
+
+## Versions
+
+Every upload gets a new version number. Update it in three places: `APP_VERSION` at the top of `app.js`, the `?v=` tags in `index.html`, and `CHANGELOG.md`.
+
 ## What it does not do yet
 
-- It cannot change anything. Add and edit happen in the sheet or its Forms.
-- Tasks and Decisions need a separate "Runway" sheet, which comes next.
+- It cannot change housing data. Add and edit homes in the sheet or its Forms.
+- Journal entries and documents cannot be added from the app yet.
 
 ## Security notes
 
