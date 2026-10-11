@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.0
+- New: each home also gets a "Log a contact here" button when the Links tab has a row named for the contact Form with its Prefill field filled in. Any Housing forms row with a Prefill field gets a per-home button.
+- Changed: the per-home buttons no longer require the row name to contain "tour".
+
 ## 0.6.0
 - New: each home on the Housing page has a "Log a tour here" button for people with edit access. It opens your Tour Notes Form with that home already chosen in the "Which home?" question.
 - Setup: the Links tab gets a fourth column, Prefill field, holding the Form question's field code (it looks like entry.1234567890) on the "Log a tour" row.

@@ -1,4 +1,4 @@
-/* Runway v0.6.0.
+/* Runway v0.7.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.6.0';
+  var APP_VERSION = '0.7.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var HOME_KEY = 'runway.sheet'; // only a sheet's id and name are stored; neither is secret
@@ -657,14 +657,17 @@
     return value ? [h('dt', null, label), h('dd', null, value)] : null;
   }
   function homeFormLabel(x) { return x.id + ' ' + (x.builder + (x.model ? ': ' + x.model : '')).trim(); }
-  function tourLink(x) {
-    if (effectiveRole() !== 'editor' || !state.planData) return null;
-    var l = (state.planData.links || []).filter(function (k) { return /tour/i.test(k.name) && /housing/i.test(k.group) && formUrl(k.url) && /^entry\.\d+$/.test(k.field.trim()); })[0];
-    if (!l) return null;
-    var u = new URL(formUrl(l.url));
-    u.searchParams.set('usp', 'pp_url');
-    u.searchParams.set(l.field.trim(), homeFormLabel(x));
-    return h('a', { class: 'btn small', href: u.href, target: '_blank', rel: 'noopener noreferrer' }, 'Log a tour here');
+  function homeLinks(x) {
+    if (effectiveRole() !== 'editor' || !state.planData) return [];
+    return (state.planData.links || []).filter(function (k) {
+      return /housing/i.test(k.group) && formUrl(k.url) && /^entry\.\d+$/.test(k.field.trim());
+    }).map(function (l) {
+      var u = new URL(formUrl(l.url));
+      u.searchParams.set('usp', 'pp_url');
+      u.searchParams.set(l.field.trim(), homeFormLabel(x));
+      var label = /tour/i.test(l.name) ? 'Log a tour here' : /contact/i.test(l.name) ? 'Log a contact here' : (l.name || 'Open form') + ' for this home';
+      return h('a', { class: 'btn small', href: u.href, target: '_blank', rel: 'noopener noreferrer' }, label);
+    });
   }
   function homeCard(x) {
     var t = x.tour || {};
@@ -690,7 +693,7 @@
             h('div', { class: 'muted small' }, [c['Contact Name'], c['Channel'], c['Direction']].filter(Boolean).join(', ')),
             c['Summary'] ? h('div', { class: 'small' }, c['Summary']) : null);
         }))) : null,
-        h('div', { class: 'chips' }, tourLink(x), x.url ? h('a', { class: 'btn ghost small', href: x.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open listing') : null)
+        h('div', { class: 'chips' }, homeLinks(x), x.url ? h('a', { class: 'btn ghost small', href: x.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open listing') : null)
       )
     );
   }
