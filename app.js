@@ -1,13 +1,13 @@
-/* Runway v0.9.0.
+/* Runway v0.10.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, Chronology, Journal and Documents.
-   - Editors (by Google's sharing settings) can check off tasks, add tasks, decisions and journal entries, and change a home's status and pick why a home was rejected.
+   - Editors (by Google's sharing settings) can check off tasks, add tasks, decisions and journal entries, and change a home's status pick why a home was rejected, and add document links.
    Sheet text is always inserted as text (never as HTML). */
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.9.0';
+  var APP_VERSION = '0.10.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var HOME_KEY = 'runway.sheet'; // only a sheet's id and name are stored; neither is secret
@@ -280,7 +280,7 @@
         .catch(function () { by.docs = null; })
         .then(function () { return by; });
     }).then(function (by) {
-      state.data = { homes: buildHomes(by), tours: by.tours || [], contacts: by.contacts || [], docs: by.docs, listingHead: (by.listing && by.listing.head) || [] };
+      state.data = { homes: buildHomes(by), tours: by.tours || [], contacts: by.contacts || [], docs: by.docs, listingHead: (by.listing && by.listing.head) || [], docsHead: (by.docs && by.docs.head) || [] };
     });
   }
 
@@ -401,6 +401,17 @@
       if (iR >= 0) data.push({ range: "'Home Listing'!" + colLetter(iR) + x.row, values: [[safeText(reasonText)]] });
       return api(homeBase() + '/values:batchUpdate', { method: 'POST', body: { valueInputOption: 'USER_ENTERED', data: data } });
     }).then(function () { x.status = status; if (state.data.listingHead.indexOf('Rejected Reason') >= 0) x.reason = reasonText; });
+  }
+  function driveIdFrom(url) {
+    var m = String(url).match(/\/d\/([A-Za-z0-9_-]{15,})/) || String(url).match(/[?&]id=([A-Za-z0-9_-]{15,})/);
+    return m ? m[1] : '';
+  }
+  function addDocument(f) {
+    var head = state.data.docsHead;
+    var obj = { 'Title': f.title, 'URL': f.url, 'Drive file ID': driveIdFrom(f.url), 'Workstream': f.stream, 'Home ID': f.homeId, 'Owner': f.owner,
+      'Sensitivity': f.sensitivity, 'Added by': who(), 'Added on': todayText(), 'Review date': isoToUs(f.review) };
+    return api(homeBase() + '/values/' + enc("'Documents & Links'!A1") + ':append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS',
+      { method: 'POST', body: { values: [rowFrom(head, obj)] } }).then(loadHome);
   }
   function addJournal(f) {
     var P = state.planData;
@@ -870,20 +881,48 @@
       h('section', { class: 'card' }, h('div', { class: 'tl' }, rows)));
   }
 
+  function addDocForm() {
+    var d = state.data;
+    var title = h('input', { type: 'text', maxlength: '200', placeholder: 'What the document is' });
+    var url = h('input', { type: 'url', maxlength: '800', placeholder: 'https://', inputmode: 'url' });
+    var names = {};
+    ((state.planData && state.planData.streams) || []).forEach(function (n) { names[n] = true; });
+    (d.docs || []).forEach(function (r) { if (r['Workstream']) names[r['Workstream']] = true; });
+    var stream = h('input', { type: 'text', list: 'doc-streams', maxlength: '60' });
+    var dl = h('datalist', { id: 'doc-streams' }, Object.keys(names).map(function (n) { return h('option', { value: n }); }));
+    var home = h('select', null, h('option', { value: '' }, 'Not about one home'), d.homes.map(function (x) { return h('option', { value: x.id }, homeFormLabel(x)); }));
+    var owner = h('input', { type: 'text', maxlength: '40' });
+    var sens = h('select', null, h('option', { value: 'Normal' }, 'Normal'), h('option', { value: 'Sensitive' }, 'Sensitive'));
+    var review = h('input', { type: 'date' });
+    return h('details', { class: 'card addform' }, h('summary', null, 'Add a document link'),
+      h('div', { class: 'stack', style: 'margin-top:14px' },
+        h('p', { class: 'muted small' }, 'Add the link only. The file stays in Drive, and Runway does not change who can open it, so share the file in Drive first. Never add account numbers, SSNs or passwords.'),
+        field('Title', title), field('Link (https)', url), field('Workstream', stream), dl, field('About a home (optional)', home), field('Owner (optional)', owner),
+        field('Sensitivity', sens), field('Review date (optional)', review),
+        h('button', { class: 'btn', type: 'button', style: 'align-self:flex-start', disabled: state.saving ? true : null, onclick: function () {
+          var link = url.value.trim();
+          if (!title.value.trim()) { toast('Give the document a title.', true); return; }
+          if (!/^https:\/\//i.test(link)) { toast('The link must start with https://', true); return; }
+          var dup = (d.docs || []).some(function (r) { return String(r['URL'] || '').trim() === link; });
+          if (dup) { toast('That link is already in the list.', true); return; }
+          save(addDocument({ title: title.value.trim(), url: link, stream: stream.value.trim(), homeId: home.value, owner: owner.value.trim(), sensitivity: sens.value, review: review.value }), 'Document added');
+        } }, 'Add document')));
+  }
   function viewDocuments() {
     var docs = state.data.docs;
     var head = h('div', null, h('h1', null, 'Documents'), h('p', { class: 'lede' }, 'Links and files, indexed from the Documents & Links tab. Runway lists them; the files stay in Drive.'));
     if (docs === null) return h('div', { class: 'stack' }, head, h('section', { class: 'card' }, h('p', null, 'Runway could not find a tab named "Documents & Links". Add it, then choose Refresh.')));
-    if (!docs.length) return h('div', { class: 'stack' }, head, h('section', { class: 'card' }, h('p', null, 'No documents yet. Add a row in the Documents & Links tab.')));
-    return h('div', { class: 'stack' }, head,
+    var form = canEditHome() && state.data.docsHead.length ? addDocForm() : null;
+    if (!docs.length) return h('div', { class: 'stack' }, head, form, h('section', { class: 'card' }, h('p', null, 'No documents yet.' + (form ? '' : ' Add a row in the Documents & Links tab.'))));
+    return h('div', { class: 'stack' }, head, form,
       h('section', { class: 'card scroll' }, h('table', null,
-        h('thead', null, h('tr', null, ['Title', 'Workstream', 'Home', 'Owner', 'Review date', ''].map(function (t) { return h('th', null, t); }))),
+        h('thead', null, h('tr', null, ['Title', 'Workstream', 'Home', 'Owner', 'Review date'].map(function (t) { return h('th', null, t); }))),
         h('tbody', null, docs.map(function (r) {
           var url = r['URL'] || (r['Drive file ID'] ? 'https://drive.google.com/open?id=' + encodeURIComponent(r['Drive file ID']) : '');
           return h('tr', null,
             h('td', null, url ? h('a', { href: url, target: '_blank', rel: 'noopener noreferrer' }, r['Title'] || 'Untitled') : (r['Title'] || 'Untitled'), ' ',
               /sensitive/i.test(r['Sensitivity'] || '') ? h('span', { class: 'tag warn' }, 'Sensitive') : null),
-            h('td', null, r['Workstream'] || ''), h('td', null, r['Home ID'] || ''), h('td', null, r['Owner'] || ''), h('td', null, r['Review date'] || ''), h('td', null, ''));
+            h('td', null, r['Workstream'] || ''), h('td', null, r['Home ID'] || ''), h('td', null, r['Owner'] || ''), h('td', null, r['Review date'] || ''));
         })))));
   }
 
