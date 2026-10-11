@@ -1,13 +1,13 @@
-/* Runway v0.10.0.
+/* Runway v0.11.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, Chronology, Journal and Documents.
-   - Editors (by Google's sharing settings) can check off tasks, add tasks, decisions and journal entries, and change a home's status pick why a home was rejected, and add document links.
+   - Editors (by Google's sharing settings) can check off tasks, add tasks, decisions and journal entries, and change a home's status pick why a home was rejected, keep the tour Decision in step with the status, and add document links.
    Sheet text is always inserted as text (never as HTML). */
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.10.0';
+  var APP_VERSION = '0.11.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var HOME_KEY = 'runway.sheet'; // only a sheet's id and name are stored; neither is secret
@@ -209,6 +209,14 @@
   }
 
   /* ---------- data ---------- */
+  function latestTour(rows) {
+    var best = null;
+    rows.forEach(function (r) {
+      var d = parseDate(r['Visit Date']), bd = best ? parseDate(best['Visit Date']) : null;
+      if (!best || (d && (!bd || d >= bd)) || (!d && !bd && r._row > best._row)) best = r;
+    });
+    return best;
+  }
   function buildHomes(t) {
     var tours = groupBy(t.tours, 'Home ID');
     var contacts = groupBy(t.contacts, 'Home ID');
@@ -219,7 +227,7 @@
         status: canonStatus(r['Status']), price: num(r['List Price']), upgrade: num(r['Upgrade Price']), sqft: num(r['Sq Ft']),
         visit: r['Visit Date'] || '', reason: r['Rejected Reason'] || '', url: r['Listing URL'] || '', address: r['Address'] || '',
         notes: r['Notes'] || '', contact: r['Contact'] || '', phone: r['Tel. #'] || '',
-        tour: (tours[id] || [])[0] || null, contacts: contacts[id] || []
+        tour: latestTour(tours[id] || []), contacts: contacts[id] || []
       };
     });
   }
@@ -280,7 +288,7 @@
         .catch(function () { by.docs = null; })
         .then(function () { return by; });
     }).then(function (by) {
-      state.data = { homes: buildHomes(by), tours: by.tours || [], contacts: by.contacts || [], docs: by.docs, listingHead: (by.listing && by.listing.head) || [], docsHead: (by.docs && by.docs.head) || [] };
+      state.data = { homes: buildHomes(by), tours: by.tours || [], contacts: by.contacts || [], docs: by.docs, listingHead: (by.listing && by.listing.head) || [], docsHead: (by.docs && by.docs.head) || [], tourHead: (by.tours && by.tours.head) || [] };
     });
   }
 
@@ -385,7 +393,7 @@
   function splitReasons(text) {
     return String(text || '').split(',').map(function (t) { return t.trim(); }).filter(Boolean);
   }
-  function setHomeStatus(x, status, reasons) {
+  function setHomeStatus(x, status, reasons, syncTour) {
     var head = state.data.listingHead, iS = head.indexOf('Status'), iId = head.indexOf('Home ID'), iR = head.indexOf('Rejected Reason');
     if (iS < 0 || iId < 0) return Promise.reject(new Error('The Home Listing tab needs Status and Home ID columns.'));
     if (STATUS_ORDER.indexOf(status) < 0) return Promise.reject(new Error('Choose one of the standard statuses.'));
@@ -394,13 +402,27 @@
     if (rejected && !reasons.length) return Promise.reject(new Error('Pick at least one reason for the rejection.'));
     if (reasons.some(function (r) { return REASONS.indexOf(r) < 0; })) return Promise.reject(new Error('Choose reasons from the list.'));
     var reasonText = reasons.join(', ');
-    return api(homeBase() + '/values/' + enc("'Home Listing'!" + colLetter(iId) + x.row)).then(function (j) {
-      var v = j.values && j.values[0] ? String(j.values[0][0]).trim() : '';
-      if (v !== x.id) throw new Error('The sheet changed since it was loaded. Runway refreshed it. Please try again.');
+    var tour = syncTour ? x.tour : null, th = state.data.tourHead || [];
+    var iD = th.indexOf('Decision'), iTid = th.indexOf('Home ID');
+    if (tour && (iD < 0 || iTid < 0)) return Promise.reject(new Error('The Home Tour Notes tab needs Decision and Home ID columns.'));
+    function guard(tab, colIndex, row, id) {
+      return api(homeBase() + '/values/' + enc("'" + tab + "'!" + colLetter(colIndex) + row)).then(function (j) {
+        var v = j.values && j.values[0] ? String(j.values[0][0]).trim() : '';
+        if (v !== id) throw new Error('The sheet changed since it was loaded. Runway refreshed it. Please try again.');
+      });
+    }
+    return guard('Home Listing', iId, x.row, x.id).then(function () {
+      return tour ? guard('Home Tour Notes', iTid, tour._row, x.id) : null;
+    }).then(function () {
       var data = [{ range: "'Home Listing'!" + colLetter(iS) + x.row, values: [[safeText(status)]] }];
       if (iR >= 0) data.push({ range: "'Home Listing'!" + colLetter(iR) + x.row, values: [[safeText(reasonText)]] });
+      if (tour) data.push({ range: "'Home Tour Notes'!" + colLetter(iD) + tour._row, values: [[safeText(status)]] });
       return api(homeBase() + '/values:batchUpdate', { method: 'POST', body: { valueInputOption: 'USER_ENTERED', data: data } });
-    }).then(function () { x.status = status; if (state.data.listingHead.indexOf('Rejected Reason') >= 0) x.reason = reasonText; });
+    }).then(function () {
+      x.status = status;
+      if (iR >= 0) x.reason = reasonText;
+      if (tour) tour['Decision'] = status;
+    });
   }
   function driveIdFrom(url) {
     var m = String(url).match(/\/d\/([A-Za-z0-9_-]{15,})/) || String(url).match(/[?&]id=([A-Za-z0-9_-]{15,})/);
@@ -727,13 +749,20 @@
       REASONS.map(function (r, i) { return h('label', null, boxes[i], r); }));
     sel.addEventListener('change', function () { group.hidden = sel.value !== 'Rejected'; });
     function chosen() { return boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; }); }
-    return h('div', { class: 'stack', style: 'gap:8px' }, field('Change status', sel), group,
+    var tour = x.tour, td = tour ? String(tour['Decision'] || '').trim() : '';
+    var sync = tour ? h('input', { type: 'checkbox', checked: true, 'aria-label': 'Also update the Decision in the latest Tour Notes entry' }) : null;
+    var syncRow = tour ? h('label', { class: 'sync' }, sync, 'Also set the Decision in the latest Tour Notes entry' + (tour['Visit Date'] ? ' (' + tour['Visit Date'] + ')' : '') + ' to match') : null;
+    var mismatch = tour && td && td.toLowerCase() !== x.status.toLowerCase()
+      ? h('p', { class: 'muted small' }, 'Tour Notes says "' + td + '", but Home Listing says "' + x.status + '".') : null;
+    return h('div', { class: 'stack', style: 'gap:8px' }, field('Change status', sel), group, syncRow, mismatch,
       sel.value !== 'Rejected' && current.length ? h('p', { class: 'muted small' }, 'Changing a rejected home to another status clears its reason.') : null,
       h('button', { class: 'btn small', type: 'button', style: 'align-self:flex-start', disabled: state.saving ? true : null, onclick: function () {
         var picked = chosen();
+        var doSync = !!(sync && sync.checked);
+        var tourOff = doSync && td.toLowerCase() !== sel.value.toLowerCase();
         var same = sel.value === x.status && (sel.value !== 'Rejected' || picked.slice().sort().join('|') === current.slice().sort().join('|'));
-        if (same) { toast('Nothing has changed.', true); return; }
-        save(setHomeStatus(x, sel.value, picked), sel.value === 'Rejected' ? 'Rejected, with reasons saved' : 'Status updated to ' + sel.value);
+        if (same && !tourOff) { toast('Nothing has changed.', true); return; }
+        save(setHomeStatus(x, sel.value, picked, doSync), (sel.value === 'Rejected' ? 'Rejected, with reasons saved' : 'Status updated to ' + sel.value) + (doSync ? '. Tour Notes updated.' : ''));
       } }, 'Save status'));
   }
   function homeCard(x) {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.0
+- New: when you change a home's status, a checkbox (on by default) also sets the Decision in that home's latest Tour Notes entry to match. Runway checks both rows still belong to the Home ID, then writes the Home Listing and Tour Notes cells in one save.
+- New: when the Tour Notes Decision and the Home Listing status disagree, the home's card says so.
+- The latest tour is the one with the most recent Visit Date. Homes with no Tour Notes entry get no checkbox.
+- Changed: a home's card now shows the Decision from its latest tour, not its first.
+
 ## 0.10.0
 - New: people with edit access can add a document link from the Documents page. Runway appends a row to the Documents & Links tab with title, link, workstream, optional home, owner, sensitivity and review date, and fills in "Added by", "Added on" and the Drive file ID (when the link is a Drive or Docs link).
 - Safeguards: the link must start with https://, a link already in the list is refused, and typed text is saved as plain text.
