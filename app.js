@@ -1,13 +1,13 @@
-/* Runway v0.12.0.
+/* Runway v0.13.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, Requirements, Chronology, Journal and Documents.
-   - Editors (by Google's sharing settings) can check off tasks, add tasks, decisions and journal entries, and change a home's status pick why a home was rejected, keep the tour Decision in step with the status, and add document links.
+   - Editors (by Google's sharing settings) can check off tasks, add tasks, decisions and journal entries, and change a home's status pick why a home was rejected, keep the tour Decision in step with the status, add document links, and check each home against the requirements.
    Sheet text is always inserted as text (never as HTML). */
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.12.0';
+  var APP_VERSION = '0.13.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var HOME_KEY = 'runway.sheet'; // only a sheet's id and name are stored; neither is secret
@@ -23,7 +23,7 @@
     token: null, expires: 0, user: null, sheet: loadStore(HOME_KEY), plan: loadStore(PLAN_KEY),
     role: null, planRole: null, data: null, planData: null, planError: null,
     loadedAt: null, busy: false, error: null, saving: false, toast: null,
-    route: 'overview', openHomes: {}, filter: 'All', taskStream: 'All', showDone: false, needSignIn: true
+    route: 'overview', openHomes: {}, openReq: {}, filter: 'All', taskStream: 'All', showDone: false, needSignIn: true
   };
 
   var app = document.getElementById('app');
@@ -209,6 +209,33 @@
   }
 
   /* ---------- data ---------- */
+  function buildChecks(rows) {
+    var out = { has: false, head: [], map: {} };
+    if (!rows) return out;
+    out.head = rows.head || []; out.has = out.head.length > 0;
+    rows.forEach(function (r) {
+      if (r['Home ID'] && r['Req ID']) out.map[r['Home ID'] + '|' + r['Req ID']] = { row: r._row, result: r['Result'] || '', note: r['Note'] || '', by: r['Checked by'] || '', on: r['Checked on'] || '' };
+    });
+    return out;
+  }
+  function normKey(t) { return String(t || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+  function tourValue(tour, fieldName) {
+    if (!tour || !fieldName) return '';
+    var fk = normKey(fieldName), keys = Object.keys(tour);
+    for (var i = 0; i < keys.length; i++) {
+      if (keys[i] === '_row') continue;
+      var kk = normKey(keys[i]);
+      if (kk === fk || (fk.length >= 6 && kk.indexOf(fk) === 0) || (kk.length >= 6 && fk.indexOf(kk) === 0)) { if (tour[keys[i]] !== '') return tour[keys[i]]; }
+    }
+    return '';
+  }
+  function reqStatus(x, q) {
+    var c = state.data.checks.map[x.id + '|' + q.id];
+    var ex = c && /^(yes|no)$/i.test(c.result) ? (c.result.toLowerCase() === 'yes' ? 'Yes' : 'No') : '';
+    var tv = tourValue(x.tour, q.tourField), tl = tv.trim().toLowerCase(), derived = '';
+    if (tl === 'yes' || tl === 'no') derived = ((tl === 'yes') !== (q.meetsWhen === 'No')) ? 'Yes' : 'No';
+    return { result: ex || derived || 'Unknown', source: ex ? 'checked' : derived ? 'tour' : 'none', hint: derived ? '' : tv, note: c ? c.note : '', existing: c || null };
+  }
   function latestTour(rows) {
     var best = null;
     rows.forEach(function (r) {
@@ -286,9 +313,14 @@
       return api('https://sheets.googleapis.com/v4/spreadsheets/' + id + '/values/' + enc("'" + DOCS_TAB + "'") + '?valueRenderOption=FORMATTED_VALUE')
         .then(function (d) { by.docs = table(d.values); })
         .catch(function () { by.docs = null; })
+        .then(function () {
+          return api('https://sheets.googleapis.com/v4/spreadsheets/' + id + '/values/' + enc("'Home Checks'") + '?valueRenderOption=FORMATTED_VALUE')
+            .then(function (c) { by.checks = table(c.values); })
+            .catch(function () { by.checks = null; });
+        })
         .then(function () { return by; });
     }).then(function (by) {
-      state.data = { homes: buildHomes(by), tours: by.tours || [], contacts: by.contacts || [], docs: by.docs, listingHead: (by.listing && by.listing.head) || [], docsHead: (by.docs && by.docs.head) || [], tourHead: (by.tours && by.tours.head) || [] };
+      state.data = { homes: buildHomes(by), tours: by.tours || [], contacts: by.contacts || [], docs: by.docs, listingHead: (by.listing && by.listing.head) || [], docsHead: (by.docs && by.docs.head) || [], tourHead: (by.tours && by.tours.head) || [], checks: buildChecks(by.checks) };
     });
   }
 
@@ -328,7 +360,8 @@
           state.planData.hasRequirements = !!(rows.head && rows.head.length);
           state.planData.requirements = rows.map(function (r) {
             return { section: r['Section'] || 'Other', group: r['Group'] || '', text: r['Requirement'] || '', detail: r['Detail'] || '',
-              tracked: trackedKind(r['Where it is tracked']), trackedText: r['Where it is tracked'] || '', priority: r['Priority'] || '' };
+              tracked: trackedKind(r['Where it is tracked']), trackedText: r['Where it is tracked'] || '', priority: r['Priority'] || '',
+              id: r['Req ID'] || r['Requirement'] || '', tourField: r['Tour field'] || '', meetsWhen: /^no/i.test(r['Meets when'] || '') ? 'No' : 'Yes' };
           }).filter(function (q) { return q.text; });
         }).catch(function () { state.planData.requirements = []; state.planData.hasRequirements = false; });
       });
@@ -433,6 +466,31 @@
       if (iR >= 0) x.reason = reasonText;
       if (tour) tour['Decision'] = status;
     });
+  }
+  function guardCell(tab, colIndex, row, expected) {
+    return api(homeBase() + '/values/' + enc("'" + tab + "'!" + colLetter(colIndex) + row)).then(function (j) {
+      var v = j.values && j.values[0] ? String(j.values[0][0]).trim() : '';
+      if (v !== expected) throw new Error('The sheet changed since it was loaded. Runway refreshed it. Please try again.');
+    });
+  }
+  function setCheck(x, q, result) {
+    var checks = state.data.checks, head = checks.head;
+    if (!checks.has) return Promise.reject(new Error('Add a Home Checks tab to the home-search sheet to save checks.'));
+    var iH = head.indexOf('Home ID'), iQ = head.indexOf('Req ID');
+    if (iH < 0 || iQ < 0 || head.indexOf('Result') < 0) return Promise.reject(new Error('The Home Checks tab needs Home ID, Req ID and Result columns.'));
+    var key = x.id + '|' + q.id, ex = checks.map[key], by = who(), on = todayText();
+    if (ex) {
+      var cells = [['Result', result], ['Checked by', result ? by : ''], ['Checked on', result ? on : '']].map(function (p) {
+        var i = head.indexOf(p[0]); return i < 0 ? null : { range: "'Home Checks'!" + colLetter(i) + ex.row, values: [[safeText(p[1])]] };
+      }).filter(Boolean);
+      return guardCell('Home Checks', iH, ex.row, x.id).then(function () { return guardCell('Home Checks', iQ, ex.row, q.id); }).then(function () {
+        return api(homeBase() + '/values:batchUpdate', { method: 'POST', body: { valueInputOption: 'USER_ENTERED', data: cells } });
+      }).then(function () { ex.result = result; ex.by = result ? by : ''; ex.on = result ? on : ''; });
+    }
+    if (!result) return Promise.resolve();
+    var obj = { 'Home ID': x.id, 'Req ID': q.id, 'Requirement': q.text, 'Result': result, 'Note': '', 'Checked by': by, 'Checked on': on };
+    return api(homeBase() + '/values/' + enc("'Home Checks'!A1") + ':append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS',
+      { method: 'POST', body: { values: [rowFrom(head, obj)] } }).then(loadHome);
   }
   function driveIdFrom(url) {
     var m = String(url).match(/\/d\/([A-Za-z0-9_-]{15,})/) || String(url).match(/[?&]id=([A-Za-z0-9_-]{15,})/);
@@ -745,6 +803,44 @@
       return h('a', { class: 'btn small', href: u.href, target: '_blank', rel: 'noopener noreferrer' }, label);
     });
   }
+  function reqSummary(x) {
+    var P = state.planData; if (!P || !P.requirements.length) return null;
+    var yes = 0, no = 0, unk = 0, mustFail = false;
+    P.requirements.forEach(function (q) {
+      var r = reqStatus(x, q).result;
+      if (r === 'Yes') yes++; else if (r === 'No') { no++; if (/must/i.test(q.priority)) mustFail = true; } else unk++;
+    });
+    return { yes: yes, no: no, unk: unk, total: P.requirements.length, mustFail: mustFail };
+  }
+  function reqChecklist(x) {
+    var P = state.planData; if (!P || !P.requirements.length) return null;
+    var sm = reqSummary(x), editable = canEditHome() && state.data.checks.has;
+    var sections = [], by = {};
+    P.requirements.forEach(function (q) { if (!by[q.section]) { by[q.section] = []; sections.push(q.section); } by[q.section].push(q); });
+    var body = sections.map(function (name) {
+      return h('div', null, h('h3', null, name), h('ul', { class: 'tasks' }, by[name].map(function (q) {
+        var st = reqStatus(x, q);
+        var seg = editable ? ['Yes', 'No'].map(function (r) {
+          var on = st.source === 'checked' && st.result === r;
+          return h('button', { type: 'button', class: 'seg', 'aria-pressed': String(on), disabled: state.saving ? true : null,
+            'aria-label': r + ': ' + q.text, onclick: function () { save(setCheck(x, q, on ? '' : r), on ? 'Cleared' : 'Saved: ' + r); } }, r);
+        }) : null;
+        var label = st.result + (st.source === 'tour' ? ' (Tour Notes)' : st.source === 'checked' ? ' (checked)' : '');
+        return h('li', { class: 'req' },
+          h('div', { class: 'tbody' }, h('div', { class: 'ttitle' }, q.text),
+            st.hint ? h('div', { class: 'muted small' }, 'Tour Notes: ' + st.hint) : null,
+            st.note ? h('div', { class: 'muted small' }, st.note) : null),
+          h('div', { class: 'chips', style: 'gap:6px' },
+            q.priority ? h('span', { class: 'tag' + (/must/i.test(q.priority) ? ' active' : '') }, q.priority) : null,
+            h('span', { class: 'tag' + (st.result === 'No' ? ' warn' : st.result === 'Yes' ? ' active' : '') }, label), seg));
+      })));
+    });
+    var hint = canEditHome() && !state.data.checks.has
+      ? h('p', { class: 'muted small' }, 'To save checks, add a tab named "Home Checks" to the home-search sheet with the headers: Home ID, Req ID, Requirement, Result, Note, Checked by, Checked on.') : null;
+    return h('details', { class: 'reqlist', open: state.openReq[x.id] ? true : null, ontoggle: function (e) { state.openReq[x.id] = e.target.open; } },
+      h('summary', null, 'Requirements: ' + sm.yes + ' met, ' + sm.no + ' not met, ' + sm.unk + ' unknown of ' + sm.total),
+      h('div', { class: 'stack', style: 'margin-top:10px' }, hint, body));
+  }
   function statusEditor(x) {
     if (!canEditHome()) return null;
     var options = STATUS_ORDER.slice();
@@ -782,7 +878,7 @@
       h('summary', null,
         h('div', { class: 'head' }, h('h3', null, homeName(x)), h('strong', null, money(x.price))),
         h('div', { class: 'muted small' }, [x.community, x.city].filter(Boolean).join(', ')),
-        h('div', { class: 'chips' }, tagFor(x.status), x.reason ? h('span', { class: 'tag' }, x.reason) : null, x.visit ? h('span', { class: 'tag' }, 'Toured ' + x.visit) : null)
+        h('div', { class: 'chips' }, tagFor(x.status), (function () { var m = reqSummary(x); return m ? h('span', { class: 'tag' + (m.mustFail ? ' warn' : '') }, m.yes + ' of ' + m.total + ' requirements met' + (m.no ? ', ' + m.no + ' not met' : '')) : null; })(), x.reason ? h('span', { class: 'tag' }, x.reason) : null, x.visit ? h('span', { class: 'tag' }, 'Toured ' + x.visit) : null)
       ),
       h('div', { class: 'body' },
         h('dl', { class: 'kv' },
@@ -799,6 +895,7 @@
             h('div', { class: 'muted small' }, [c['Contact Name'], c['Channel'], c['Direction']].filter(Boolean).join(', ')),
             c['Summary'] ? h('div', { class: 'small' }, c['Summary']) : null);
         }))) : null,
+        reqChecklist(x),
         statusEditor(x),
         h('div', { class: 'chips' }, homeLinks(x), x.url ? h('a', { class: 'btn ghost small', href: x.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open listing') : null)
       )

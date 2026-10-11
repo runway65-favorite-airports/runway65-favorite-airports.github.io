@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.13.0
+- New: each home's card has a Requirements checklist. Every requirement shows Yes, No or Unknown. Answers come from the home's latest Tour Notes entry when the requirement is linked to a Yes/No Tour Notes column, and from checks that people with edit access record in Runway. A check made in Runway overrides the Tour Notes answer, and tapping the same button again clears it.
+- New: the card shows a count, for example "21 of 38 requirements met, 2 not met". It is highlighted when a requirement marked Must is not met.
+- New: Requirements tab gets three optional columns: Req ID (permanent ID), Tour field (the Tour Notes column that answers it) and Meets when (Yes, or No for requirements like "center island without a main sink").
+- New: checks are saved in a Home Checks tab in the home-search sheet (Home ID, Req ID, Requirement, Result, Note, Checked by, Checked on). Until that tab exists, checklists are read-only and editors see how to add it.
+- Viewers see the same checklist with no buttons.
+
 ## 0.12.0
 - New: Requirements page, read from an optional Requirements tab in the Runway planning sheet (headers: Section, Group, Requirement, Detail, Where it is tracked, Priority). Requirements are grouped by section, with a tag for where each is checked (Tour Notes, Home Listings, Pre-qualify, Not captured) and a Must or Nice tag when a Priority is filled in.
 - New: filter by where a requirement is tracked, and search by text.
