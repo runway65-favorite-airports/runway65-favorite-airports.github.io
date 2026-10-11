@@ -1,13 +1,13 @@
-/* Runway v0.3.0.
+/* Runway v0.4.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
-   - Shows Overview, Tasks, Decisions, Housing, Chronology and Documents.
-   - Editors (by Google's sharing settings) can check off tasks and add tasks and decisions.
+   - Shows Overview, Tasks, Decisions, Housing, Chronology, Journal and Documents.
+   - Editors (by Google's sharing settings) can check off tasks and add tasks, decisions and journal entries.
    Sheet text is always inserted as text (never as HTML). */
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.3.0';
+  var APP_VERSION = '0.4.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var HOME_KEY = 'runway.sheet'; // only a sheet's id and name are stored; neither is secret
@@ -243,6 +243,12 @@
     });
   }
 
+  function buildJournal(rows) {
+    return rows.filter(function (r) { return r['Entry ID'] || r['Title']; }).map(function (r) {
+      return { id: r['Entry ID'] || '', row: r._row, date: parseDate(r['Date']), dateText: r['Date'] || '', title: r['Title'] || '', detail: r['Detail'] || '', by: r['Logged by'] || '' };
+    });
+  }
+
   function fetchRole(file) {
     return api('https://www.googleapis.com/drive/v3/files/' + enc(file.id) + '?fields=name,capabilities(canEdit)&supportsAllDrives=true')
       .then(function (f) { file.name = f.name; return f.capabilities && f.capabilities.canEdit ? 'editor' : 'viewer'; })
@@ -283,8 +289,14 @@
       state.planData = {
         tasks: buildTasks(tasks), decisions: buildDecisions(decisions),
         streams: (by.streams || []).map(function (r) { return r['Workstream']; }).filter(Boolean),
-        heads: { tasks: tasks.head || [], decisions: decisions.head || [] }
+        journal: [], hasJournal: false,
+        heads: { tasks: tasks.head || [], decisions: decisions.head || [], journal: [] }
       };
+      return api(sheetsBase() + '/values/' + enc("'Journal'") + '?valueRenderOption=FORMATTED_VALUE').then(function (j) {
+        var rows = table(j.values);
+        state.planData.journal = buildJournal(rows); state.planData.heads.journal = rows.head || [];
+        state.planData.hasJournal = !!(rows.head && rows.head.length);
+      }).catch(function () { state.planData.journal = []; state.planData.hasJournal = false; });
     }).catch(function (e) { state.planData = null; state.planError = explain(e); });
   }
 
@@ -350,6 +362,11 @@
     var P = state.planData;
     var obj = { 'Decision ID': nextId(P.decisions, 'D'), 'Decision': f.title, 'Workstream': f.stream, 'Options': f.options, 'Owners': f.owners, 'CFP input needed': f.cfp, 'Status': 'Open', 'Logged by': who() };
     return appendRow('Decisions', rowFrom(P.heads.decisions, obj)).then(loadPlan);
+  }
+  function addJournal(f) {
+    var P = state.planData;
+    var obj = { 'Entry ID': nextId(P.journal, 'J'), 'Date': isoToUs(f.date) || todayText(), 'Title': f.title, 'Detail': f.detail, 'Logged by': who() };
+    return appendRow('Journal', rowFrom(P.heads.journal, obj)).then(loadPlan);
   }
   function markDecided(d, reasoning) {
     var head = state.planData.heads.decisions;
@@ -448,6 +465,7 @@
     var total = P ? P.tasks.length : 0;
     var nextUp = P ? openTasksSorted(P.tasks).slice(0, 5) : [];
     var openDecisions = P ? P.decisions.filter(function (x) { return x.status === 'Open'; }) : [];
+    var latest = P && P.journal.length ? P.journal.slice().sort(function (a, b) { return (b.date ? b.date.getTime() : 0) - (a.date ? a.date.getTime() : 0); })[0] : null;
 
     var hero = h('section', { class: 'card hero stack' },
       h('div', { class: 'small' }, 'Target date'),
@@ -493,15 +511,25 @@
               h('div', { class: 'small' }, x.visit ? 'Toured ' + x.visit : 'Not toured yet'));
           })) : h('p', { class: 'muted' }, 'No homes marked Active.')),
         h('section', { class: 'card col stack' },
+          h('h2', null, 'Homes to tour'),
+          toTour.length ? h('ul', { class: 'list' }, toTour.map(function (x) {
+            return h('li', null, h('strong', null, homeName(x)), h('div', { class: 'muted small' }, [x.community, x.city].filter(Boolean).join(', ')));
+          })) : h('p', { class: 'muted' }, 'No homes waiting to be toured.'))),
+      h('div', { class: 'row' },
+        h('section', { class: 'card col stack' },
           h('h2', null, 'Open follow-ups'),
           follow.length ? h('ul', { class: 'list' }, follow.map(function (c) {
             return h('li', null,
               h('strong', null, col(c, /^next action/i) || c['Subject'] || 'Follow up'),
               h('div', { class: 'muted small' }, [c['Builder'], c['Contact Name']].filter(Boolean).join(', ')),
               col(c, /^due date/i) ? h('div', { class: 'small' }, 'Due ' + col(c, /^due date/i)) : null);
-          })) : h('p', { class: 'muted' }, 'No follow-ups marked Yes in the Contacts Log.'),
-          toTour.length ? h('div', { class: 'stack' }, h('h3', null, 'Homes to tour'),
-            h('ul', { class: 'list' }, toTour.map(function (x) { return h('li', null, homeName(x), h('span', { class: 'muted small' }, ' (' + [x.community, x.city].filter(Boolean).join(', ') + ')')); }))) : null))
+          })) : h('p', { class: 'muted' }, 'No follow-ups marked Yes in the Contacts Log.')),
+        h('section', { class: 'card col stack' },
+          h('h2', null, 'Latest journal entry'),
+          latest ? h('div', { class: 'stack', style: 'gap:6px' }, h('strong', null, latest.title), h('div', { class: 'muted small' }, [latest.dateText, latest.by].filter(Boolean).join(' | ')),
+            latest.detail ? h('p', null, latest.detail) : null, h('a', { class: 'btn ghost small', href: '#/journal', style: 'align-self:flex-start' }, 'Open the journal'))
+          : h('p', { class: 'muted' }, 'No entries yet.'),
+          !latest ? h('a', { class: 'btn ghost small', href: '#/journal', style: 'align-self:flex-start' }, 'Open the journal') : null))
     );
   }
 
@@ -666,6 +694,41 @@
     );
   }
 
+  /* ----- Journal ----- */
+  function addJournalForm(P) {
+    var title = h('input', { type: 'text', maxlength: '200', placeholder: 'A moment worth remembering' });
+    var date = h('input', { type: 'date' });
+    var d0 = new Date(); date.value = d0.getFullYear() + '-' + pad(d0.getMonth() + 1, 2) + '-' + pad(d0.getDate(), 2);
+    var detail = h('textarea', { rows: '4', maxlength: '2000', placeholder: 'What happened, and how it felt' });
+    return h('details', { class: 'card addform', open: true }, h('summary', null, 'Add an entry'),
+      h('div', { class: 'stack', style: 'margin-top:14px' },
+        field('Title', title), field('Date', date), field('Details (optional)', detail),
+        h('button', { class: 'btn', type: 'button', style: 'align-self:flex-start', disabled: state.saving ? true : null, onclick: function () {
+          if (!title.value.trim()) { toast('Give the entry a title.', true); return; }
+          save(addJournal({ title: title.value.trim(), date: date.value, detail: detail.value.trim() }), 'Entry added');
+        } }, 'Save entry')));
+  }
+  function viewJournal() {
+    var head = pageHead('Journal', 'Moments from the journey, in your own words.');
+    if (!state.plan) return h('div', { class: 'stack' }, head, connectCard('The journal'));
+    if (state.planError) return h('div', { class: 'stack' }, head, planProblem());
+    var P = state.planData; if (!P) return h('div', { class: 'stack' }, head);
+    if (!P.hasJournal) {
+      return h('div', { class: 'stack' }, head, h('section', { class: 'card stack' }, h('h2', null, 'Add a Journal tab'),
+        h('p', null, 'In the Runway planning sheet, add a tab named "Journal" with these headers in row 1, in this order:'),
+        h('p', null, h('strong', null, 'Entry ID, Date, Title, Detail, Logged by')),
+        h('p', { class: 'muted' }, 'Then choose Refresh.')));
+    }
+    var list = P.journal.slice().sort(function (a, b) { return (b.date ? b.date.getTime() : 0) - (a.date ? a.date.getTime() : 0); });
+    return h('div', { class: 'stack' }, head,
+      canEditPlan() ? addJournalForm(P) : h('p', { class: 'muted small' }, 'You can read every entry. Only people with edit access to the planning sheet can add them.'),
+      list.length ? list.map(function (e) {
+        return h('section', { class: 'card stack', style: 'gap:6px' }, h('h2', null, e.title),
+          h('div', { class: 'muted small' }, [e.dateText, e.by].filter(Boolean).join(' | ')),
+          e.detail ? h('p', { style: 'white-space:pre-wrap' }, e.detail) : null);
+      }) : h('p', { class: 'muted' }, 'No entries yet.'));
+  }
+
   function viewChronology() {
     var d = state.data, names = {}, ev = [], seen = {};
     d.homes.forEach(function (x) { names[x.id] = homeName(x); });
@@ -685,6 +748,9 @@
       state.planData.tasks.forEach(function (t) {
         var dt = t.status === 'Done' ? parseDate(t.completedOn) : null;
         if (dt) ev.push({ date: dt, tag: 'Task', title: 'Done: ' + t.title, detail: [t.stream, t.completedBy ? 'by ' + t.completedBy : ''].filter(Boolean).join(', ') });
+      });
+      state.planData.journal.forEach(function (e) {
+        if (e.date) ev.push({ date: e.date, tag: 'Journal', title: e.title, detail: e.detail });
       });
       state.planData.decisions.forEach(function (x) {
         var dt = x.status === 'Decided' ? parseDate(x.decidedOn) : null;
@@ -706,7 +772,7 @@
       rows.push(row(e, e.date > now ? 'future' : ''));
     });
     return h('div', { class: 'stack' },
-      pageHead('Chronology', 'The journey in order: tours, builder contacts, finished tasks and decisions.'),
+      pageHead('Chronology', 'The journey in order: tours, builder contacts, finished tasks, decisions and journal entries.'),
       h('section', { class: 'card' }, h('div', { class: 'tl' }, rows)));
   }
 
@@ -745,9 +811,9 @@
   /* ---------- shell ---------- */
   var ROUTES = {
     overview: ['Overview', viewOverview], tasks: ['Tasks', viewTasks], decisions: ['Decisions', viewDecisions],
-    housing: ['Housing', viewHousing], chronology: ['Chronology', viewChronology], documents: ['Documents', viewDocuments], sheets: ['Sheets', viewSheets]
+    housing: ['Housing', viewHousing], chronology: ['Chronology', viewChronology], journal: ['Journal', viewJournal], documents: ['Documents', viewDocuments], sheets: ['Sheets', viewSheets]
   };
-  var NAV = ['overview', 'tasks', 'decisions', 'housing', 'chronology', 'documents'];
+  var NAV = ['overview', 'tasks', 'decisions', 'housing', 'chronology', 'journal', 'documents'];
 
   function go(r) { location.hash = '#/' + r; }
   function readRoute() {
