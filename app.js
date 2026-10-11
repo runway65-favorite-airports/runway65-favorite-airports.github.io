@@ -1,4 +1,4 @@
-/* Runway v0.5.0.
+/* Runway v0.6.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.5.0';
+  var APP_VERSION = '0.6.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var HOME_KEY = 'runway.sheet'; // only a sheet's id and name are stored; neither is secret
@@ -300,7 +300,7 @@
       }).catch(function () { state.planData.journal = []; state.planData.hasJournal = false; })
       .then(function () {
         return api(sheetsBase() + '/values/' + enc("'Links'") + '?valueRenderOption=FORMATTED_VALUE').then(function (j) {
-          state.planData.links = table(j.values).map(function (r) { return { name: r['Name'] || '', url: r['URL'] || '', group: r['Group'] || '' }; });
+          state.planData.links = table(j.values).map(function (r) { return { name: r['Name'] || '', url: r['URL'] || '', group: r['Group'] || '', field: r['Prefill field'] || '' }; });
         }).catch(function () { state.planData.links = []; });
       });
     }).catch(function (e) { state.planData = null; state.planError = explain(e); });
@@ -656,6 +656,16 @@
   function fact(label, value) {
     return value ? [h('dt', null, label), h('dd', null, value)] : null;
   }
+  function homeFormLabel(x) { return x.id + ' ' + (x.builder + (x.model ? ': ' + x.model : '')).trim(); }
+  function tourLink(x) {
+    if (effectiveRole() !== 'editor' || !state.planData) return null;
+    var l = (state.planData.links || []).filter(function (k) { return /tour/i.test(k.name) && /housing/i.test(k.group) && formUrl(k.url) && /^entry\.\d+$/.test(k.field.trim()); })[0];
+    if (!l) return null;
+    var u = new URL(formUrl(l.url));
+    u.searchParams.set('usp', 'pp_url');
+    u.searchParams.set(l.field.trim(), homeFormLabel(x));
+    return h('a', { class: 'btn small', href: u.href, target: '_blank', rel: 'noopener noreferrer' }, 'Log a tour here');
+  }
   function homeCard(x) {
     var t = x.tour || {};
     var priceText = money(x.price) + (x.upgrade && x.upgrade !== x.price ? ' (' + money(x.upgrade) + ' with upgrades)' : '');
@@ -680,7 +690,7 @@
             h('div', { class: 'muted small' }, [c['Contact Name'], c['Channel'], c['Direction']].filter(Boolean).join(', ')),
             c['Summary'] ? h('div', { class: 'small' }, c['Summary']) : null);
         }))) : null,
-        x.url ? h('a', { class: 'btn ghost small', href: x.url, target: '_blank', rel: 'noopener noreferrer', style: 'align-self:flex-start' }, 'Open listing') : null
+        h('div', { class: 'chips' }, tourLink(x), x.url ? h('a', { class: 'btn ghost small', href: x.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open listing') : null)
       )
     );
   }
