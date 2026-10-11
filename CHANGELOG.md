@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.0
+- New: Requirements page, read from an optional Requirements tab in the Runway planning sheet (headers: Section, Group, Requirement, Detail, Where it is tracked, Priority). Requirements are grouped by section, with a tag for where each is checked (Tour Notes, Home Listings, Pre-qualify, Not captured) and a Must or Nice tag when a Priority is filled in.
+- New: filter by where a requirement is tracked, and search by text.
+- Read-only for everyone. Until the tab exists, the page explains how to add it.
+
 ## 0.11.0
 - New: when you change a home's status, a checkbox (on by default) also sets the Decision in that home's latest Tour Notes entry to match. Runway checks both rows still belong to the Home ID, then writes the Home Listing and Tour Notes cells in one save.
 - New: when the Tour Notes Decision and the Home Listing status disagree, the home's card says so.

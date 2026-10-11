@@ -1,13 +1,13 @@
-/* Runway v0.11.0.
+/* Runway v0.12.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
-   - Shows Overview, Tasks, Decisions, Housing, Chronology, Journal and Documents.
+   - Shows Overview, Tasks, Decisions, Housing, Requirements, Chronology, Journal and Documents.
    - Editors (by Google's sharing settings) can check off tasks, add tasks, decisions and journal entries, and change a home's status pick why a home was rejected, keep the tour Decision in step with the status, and add document links.
    Sheet text is always inserted as text (never as HTML). */
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.11.0';
+  var APP_VERSION = '0.12.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var HOME_KEY = 'runway.sheet'; // only a sheet's id and name are stored; neither is secret
@@ -321,6 +321,16 @@
         return api(sheetsBase() + '/values/' + enc("'Links'") + '?valueRenderOption=FORMATTED_VALUE').then(function (j) {
           state.planData.links = table(j.values).map(function (r) { return { name: r['Name'] || '', url: r['URL'] || '', group: r['Group'] || '', field: r['Prefill field'] || '' }; });
         }).catch(function () { state.planData.links = []; });
+      }).then(function () {
+        state.planData.requirements = []; state.planData.hasRequirements = false;
+        return api(sheetsBase() + '/values/' + enc("'Requirements'") + '?valueRenderOption=FORMATTED_VALUE').then(function (j) {
+          var rows = table(j.values);
+          state.planData.hasRequirements = !!(rows.head && rows.head.length);
+          state.planData.requirements = rows.map(function (r) {
+            return { section: r['Section'] || 'Other', group: r['Group'] || '', text: r['Requirement'] || '', detail: r['Detail'] || '',
+              tracked: trackedKind(r['Where it is tracked']), trackedText: r['Where it is tracked'] || '', priority: r['Priority'] || '' };
+          }).filter(function (q) { return q.text; });
+        }).catch(function () { state.planData.requirements = []; state.planData.hasRequirements = false; });
       });
     }).catch(function (e) { state.planData = null; state.planError = explain(e); });
   }
@@ -827,6 +837,73 @@
     );
   }
 
+  /* ----- Requirements ----- */
+  var TRACKED = ['Tour Notes', 'Home Listings', 'Pre-qualify', 'Not captured'];
+  function trackedKind(text) {
+    var t = String(text || '').toLowerCase();
+    return t.indexOf('tour') === 0 ? 'Tour Notes' : t.indexOf('home listing') === 0 || t.indexOf('listing') === 0 ? 'Home Listings'
+      : t.indexOf('pre-qual') === 0 || t.indexOf('prequal') === 0 ? 'Pre-qualify' : 'Not captured';
+  }
+  function viewRequirements() {
+    var head = pageHead('Requirements', 'What you want in the new home, and where each item is checked.');
+    if (!state.plan) return h('div', { class: 'stack' }, head, connectCard('Requirements'));
+    if (state.planError) return h('div', { class: 'stack' }, head, planProblem());
+    var P = state.planData; if (!P) return h('div', { class: 'stack' }, head);
+    if (!P.hasRequirements) {
+      return h('div', { class: 'stack' }, head, h('section', { class: 'card stack' }, h('h2', null, 'Add a Requirements tab'),
+        h('p', null, 'In the Runway planning sheet, add a tab named "Requirements" with these headers in row 1, in this order:'),
+        h('p', null, h('strong', null, 'Section, Group, Requirement, Detail, Where it is tracked, Priority')),
+        h('p', { class: 'muted' }, 'Priority is optional. The quickest way is to copy the Requirements tab from the Retirement Research workbook: right-click its tab, choose Copy to > Existing spreadsheet, pick the planning sheet, and rename the copy to Requirements. Then choose Refresh.')));
+    }
+    var items = P.requirements;
+    if (!items.length) return h('div', { class: 'stack' }, head, h('p', { class: 'muted' }, 'The Requirements tab has no rows yet.'));
+    var counts = {}; TRACKED.forEach(function (k) { counts[k] = 0; });
+    items.forEach(function (q) { counts[q.tracked]++; });
+    var sections = []; var byName = {};
+    items.forEach(function (q) { if (!byName[q.section]) { byName[q.section] = []; sections.push(q.section); } byName[q.section].push(q); });
+
+    var kind = 'All', query = '', rowEls = [], cardEls = [];
+    function apply() {
+      var needle = query.trim().toLowerCase();
+      rowEls.forEach(function (r) {
+        var ok = (kind === 'All' || r.q.tracked === kind) && (!needle || (r.q.text + ' ' + r.q.detail + ' ' + r.q.group + ' ' + r.q.section).toLowerCase().indexOf(needle) >= 0);
+        r.el.hidden = !ok;
+      });
+      cardEls.forEach(function (c) { c.el.hidden = !c.rows.some(function (r) { return !r.el.hidden; }); });
+      empty.hidden = cardEls.some(function (c) { return !c.el.hidden; });
+    }
+    var chipEls = ['All'].concat(TRACKED).map(function (k) {
+      var b = h('button', { class: 'chip', type: 'button', 'aria-pressed': String(k === 'All'), onclick: function () {
+        kind = k; chipEls.forEach(function (c) { c.setAttribute('aria-pressed', String(c.dataset.k === k)); }); apply();
+      } }, k === 'All' ? 'All (' + items.length + ')' : k + ' (' + counts[k] + ')');
+      b.dataset.k = k; return b;
+    });
+    var search = h('input', { type: 'search', placeholder: 'Search requirements', 'aria-label': 'Search requirements', class: 'searchbox' });
+    search.addEventListener('input', function () { query = search.value; apply(); });
+    var empty = h('p', { class: 'muted', hidden: true }, 'Nothing matches.');
+
+    var cards = sections.map(function (name) {
+      var rows = byName[name].map(function (q) {
+        var li = h('li', { class: 'req' },
+          h('div', { class: 'tbody' }, h('div', { class: 'ttitle' }, q.text),
+            q.group || q.detail ? h('div', { class: 'muted small' }, [q.group, q.detail].filter(Boolean).join(' | ')) : null),
+          h('div', { class: 'chips', style: 'gap:6px' },
+            q.priority ? h('span', { class: 'tag' + (/must/i.test(q.priority) ? ' active' : '') }, q.priority) : null,
+            h('span', { class: 'tag' + (q.tracked === 'Not captured' ? ' warn' : q.tracked === 'Pre-qualify' ? '' : ' active') }, q.tracked)));
+        return { el: li, q: q };
+      });
+      var card = h('section', { class: 'card stack' }, h('div', { class: 'sechead' }, h('h2', null, name), h('span', { class: 'muted small' }, byName[name].length + (byName[name].length === 1 ? ' item' : ' items'))),
+        h('ul', { class: 'tasks' }, rows.map(function (r) { return r.el; })));
+      cardEls.push({ el: card, rows: rows }); rows.forEach(function (r) { rowEls.push(r); });
+      return card;
+    });
+    return h('div', { class: 'stack' }, head,
+      h('section', { class: 'card stack' },
+        h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by where it is tracked' }, chipEls), search,
+        h('p', { class: 'muted small' }, 'Tour Notes and Home Listings: Runway or your Forms already capture it. Pre-qualify: confirm before adding a home to the pipeline. Not captured: check it yourself on each visit.')),
+      cards, empty);
+  }
+
   /* ----- Journal ----- */
   function addJournalForm(P) {
     var title = h('input', { type: 'text', maxlength: '200', placeholder: 'A moment worth remembering' });
@@ -973,9 +1050,9 @@
   /* ---------- shell ---------- */
   var ROUTES = {
     overview: ['Overview', viewOverview], tasks: ['Tasks', viewTasks], decisions: ['Decisions', viewDecisions],
-    housing: ['Housing', viewHousing], chronology: ['Chronology', viewChronology], journal: ['Journal', viewJournal], documents: ['Documents', viewDocuments], sheets: ['Sheets', viewSheets]
+    housing: ['Housing', viewHousing], requirements: ['Requirements', viewRequirements], chronology: ['Chronology', viewChronology], journal: ['Journal', viewJournal], documents: ['Documents', viewDocuments], sheets: ['Sheets', viewSheets]
   };
-  var NAV = ['overview', 'tasks', 'decisions', 'housing', 'chronology', 'journal', 'documents'];
+  var NAV = ['overview', 'tasks', 'decisions', 'housing', 'requirements', 'chronology', 'journal', 'documents'];
 
   function go(r) { location.hash = '#/' + r; }
   function readRoute() {

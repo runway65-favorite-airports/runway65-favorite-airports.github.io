@@ -1,6 +1,6 @@
 # Runway
 
-Version 0.11.0. Shows Overview, Tasks, Decisions, Housing, Chronology, Journal and Documents from two Google Sheets. People with edit access can check off tasks and add tasks, decisions and journal entries. People with edit access can also change a home's status and pick the reasons for a rejection.
+Version 0.12.0. Shows Overview, Tasks, Decisions, Housing, Requirements, Chronology, Journal and Documents from two Google Sheets. People with edit access can check off tasks and add tasks, decisions and journal entries. People with edit access can also change a home's status and pick the reasons for a rejection.
 
 ## Before you upload
 
@@ -49,6 +49,10 @@ For the per-home shortcuts ("Log a tour here", "Log a contact here"), put the fi
 ## Trying status changes safely
 
 Before using it on the real home-search sheet, make a copy of that sheet in Drive, choose the copy under Sheets, and change a status there. Change the Sheets choice back to the real sheet afterward.
+
+## Requirements tab (optional)
+
+Add a tab named `Requirements` to the planning sheet with the headers `Section`, `Group`, `Requirement`, `Detail`, `Where it is tracked`, `Priority`. Priority is optional (for example Must or Nice). The Retirement Research workbook has a ready-made Requirements tab you can copy over.
 
 ## Versions
 
