@@ -1,4 +1,4 @@
-/* Runway v0.4.0.
+/* Runway v0.5.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.4.0';
+  var APP_VERSION = '0.5.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var HOME_KEY = 'runway.sheet'; // only a sheet's id and name are stored; neither is secret
@@ -292,11 +292,17 @@
         journal: [], hasJournal: false,
         heads: { tasks: tasks.head || [], decisions: decisions.head || [], journal: [] }
       };
+      state.planData.links = [];
       return api(sheetsBase() + '/values/' + enc("'Journal'") + '?valueRenderOption=FORMATTED_VALUE').then(function (j) {
         var rows = table(j.values);
         state.planData.journal = buildJournal(rows); state.planData.heads.journal = rows.head || [];
         state.planData.hasJournal = !!(rows.head && rows.head.length);
-      }).catch(function () { state.planData.journal = []; state.planData.hasJournal = false; });
+      }).catch(function () { state.planData.journal = []; state.planData.hasJournal = false; })
+      .then(function () {
+        return api(sheetsBase() + '/values/' + enc("'Links'") + '?valueRenderOption=FORMATTED_VALUE').then(function (j) {
+          state.planData.links = table(j.values).map(function (r) { return { name: r['Name'] || '', url: r['URL'] || '', group: r['Group'] || '' }; });
+        }).catch(function () { state.planData.links = []; });
+      });
     }).catch(function (e) { state.planData = null; state.planError = explain(e); });
   }
 
@@ -424,6 +430,13 @@
       h('h2', null, 'Connect the Runway planning sheet'),
       h('p', { class: 'muted' }, what + ' live in a separate planning sheet. Choose it once and Runway remembers it on this device.'),
       h('button', { class: 'btn', type: 'button', onclick: doPickPlan, style: 'align-self:flex-start' }, 'Choose planning sheet'));
+  }
+  function formUrl(u) {
+    try {
+      var x = new URL(u);
+      var ok = x.protocol === 'https:' && ((x.hostname === 'docs.google.com' && x.pathname.indexOf('/forms/') === 0) || x.hostname === 'forms.gle');
+      return ok ? x.href : null;
+    } catch (e) { return null; }
   }
   function pageHead(title, lede) { return h('div', null, h('h1', null, title), lede ? h('p', { class: 'lede' }, lede) : null); }
   function planProblem() {
@@ -685,8 +698,18 @@
       var ia = STATUS_ORDER.indexOf(a.status), ib = STATUS_ORDER.indexOf(b.status);
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.id.localeCompare(b.id);
     });
+    var quick = null;
+    if (effectiveRole() === 'editor') {
+      var links = ((state.planData && state.planData.links) || []).filter(function (l) { return /housing/i.test(l.group) && formUrl(l.url); });
+      quick = h('section', { class: 'card stack' }, h('h2', null, 'Add or update'),
+        links.length ? h('div', { class: 'chips' }, links.map(function (l) {
+          return h('a', { class: 'btn small', href: formUrl(l.url), target: '_blank', rel: 'noopener noreferrer' }, l.name || 'Open form');
+        }), state.sheet ? h('a', { class: 'btn ghost small', href: 'https://docs.google.com/spreadsheets/d/' + enc(state.sheet.id) + '/edit', target: '_blank', rel: 'noopener noreferrer' }, 'Open the sheet') : null)
+        : h('p', { class: 'muted' }, 'Add your Google Form links to a tab named Links in the Runway planning sheet (Name, URL, Group = Housing forms), then choose Refresh. Buttons for each form will appear here.'));
+    }
     return h('div', { class: 'stack' },
       h('div', null, h('h1', null, 'Housing'), h('p', { class: 'lede' }, 'Every home in your listing sheet, joined with tour notes and builder contacts by Home ID.')),
+      quick,
       h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by status' }, statuses.map(function (s) {
         return h('button', { class: 'chip', type: 'button', 'aria-pressed': String(state.filter === s), onclick: function () { state.filter = s; render(); } }, s);
       })),
