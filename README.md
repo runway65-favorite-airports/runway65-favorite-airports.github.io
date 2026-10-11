@@ -1,6 +1,6 @@
 # Runway
 
-Version 0.6.0. Shows Overview, Tasks, Decisions, Housing, Chronology, Journal and Documents from two Google Sheets. People with edit access can check off tasks and add tasks, decisions and journal entries. Housing stays read-only.
+Version 0.7.0. Shows Overview, Tasks, Decisions, Housing, Chronology, Journal and Documents from two Google Sheets. People with edit access can check off tasks and add tasks, decisions and journal entries. Housing stays read-only.
 
 ## Before you upload
 
@@ -44,7 +44,7 @@ Tasks, Decisions and the Journal live in a second Google Sheet. The tab names an
 
 Add a tab named `Links` to the planning sheet with the headers `Name`, `URL`, `Group`, `Prefill field`. Put each Google Form link in the URL column and set Group to `Housing forms`. Runway shows them as buttons on the Housing page for people with edit access. The links are never stored in this repository.
 
-For the "Log a tour" shortcut on each home, put the field code of the Tour Form's "Which home?" question (for example `entry.1234567890`) in the Prefill field column of the row named "Log a tour". The dropdown options in that Form must read exactly `HOME-### Builder: Model`, the same as Runway builds from the Home Listing tab.
+For the per-home shortcuts ("Log a tour here", "Log a contact here"), put the field code of the Tour Form's "Which home?" question (for example `entry.1234567890`) in the Prefill field column of each Housing forms row that should have a per-home button. The dropdown options in that Form must read exactly `HOME-### Builder: Model`, the same as Runway builds from the Home Listing tab.
 
 ## Versions
 
