@@ -1,0 +1,18 @@
+# Changelog
+
+## 0.3.0
+- New: Tasks and Decisions pages, read from a separate Runway planning sheet.
+- New: people with edit access can check off tasks, add tasks, add decisions, and record decisions. People with view access can read everything and change nothing.
+- New: Overview shows task progress, the next five open tasks, and open decisions.
+- New: Chronology includes finished tasks and recorded decisions.
+- New: Sheets page to choose or change each connected sheet.
+- New: version number in the footer and on the Sheets page, and version tags on the page's file links so a new version loads without a forced refresh.
+- Changed: status names such as "To tour" match regardless of capitalization.
+- Changed: the privacy policy now says that people with edit access can have Runway change the planning sheet when they take an action.
+
+## 0.2.0
+- Removed personal details from the public files.
+- Added the privacy policy page and links.
+
+## 0.1.0
+- First read-only version: Overview, Housing, Chronology, Documents.

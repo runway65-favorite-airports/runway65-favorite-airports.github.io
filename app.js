@@ -1,35 +1,50 @@
-/* Runway: read-only first version.
+/* Runway v0.3.0.
    - Signs in with Google (token flow, token kept in memory only).
-   - Opens the one sheet the person picks (drive.file scope).
-   - Shows Overview, Housing, Chronology and Documents from that sheet.
+   - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
+   - Shows Overview, Tasks, Decisions, Housing, Chronology and Documents.
+   - Editors (by Google's sharing settings) can check off tasks and add tasks and decisions.
    Sheet text is always inserted as text (never as HTML). */
 (function () {
   'use strict';
 
+  var APP_VERSION = '0.3.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
-  var STORE_KEY = 'runway.sheet'; // only the sheet's id and name; not secret
+  var HOME_KEY = 'runway.sheet'; // only a sheet's id and name are stored; neither is secret
+  var PLAN_KEY = 'runway.plan';
   var TABS = { listing: 'Home Listing', tours: 'Home Tour Notes', contacts: 'Contacts Log' };
   var DOCS_TAB = 'Documents & Links';
+  var PLAN_TABS = { tasks: 'Tasks', decisions: 'Decisions', streams: 'Workstreams' };
   var STATUS_ORDER = ['Active', 'To tour', 'Researching', 'Toured', 'Rejected', 'Purchased'];
 
   var state = {
-    token: null, expires: 0, user: null, sheet: loadSheet(), role: null,
-    data: null, loadedAt: null, busy: false, error: null,
-    route: 'overview', filter: 'All', needSignIn: true
+    token: null, expires: 0, user: null, sheet: loadStore(HOME_KEY), plan: loadStore(PLAN_KEY),
+    role: null, planRole: null, data: null, planData: null, planError: null,
+    loadedAt: null, busy: false, error: null, saving: false, toast: null,
+    route: 'overview', filter: 'All', taskStream: 'All', showDone: false, needSignIn: true
   };
 
   var app = document.getElementById('app');
 
   /* ---------- small helpers ---------- */
-  function loadSheet() {
-    try { var s = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); return s && s.id ? s : null; }
+  function loadStore(key) {
+    try { var s = JSON.parse(localStorage.getItem(key) || 'null'); return s && s.id ? s : null; }
     catch (e) { return null; }
   }
-  function saveSheet(s) {
-    try { if (s) localStorage.setItem(STORE_KEY, JSON.stringify({ id: s.id, name: s.name })); else localStorage.removeItem(STORE_KEY); }
+  function saveStore(key, s) {
+    try { if (s) localStorage.setItem(key, JSON.stringify({ id: s.id, name: s.name })); else localStorage.removeItem(key); }
     catch (e) { /* storage unavailable */ }
   }
+  function enc(s) { return encodeURIComponent(s); }
+  function colLetter(i) {
+    var s = ''; i++;
+    while (i > 0) { var m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); }
+    return s;
+  }
+  function pad(n, w) { var s = String(n); while (s.length < w) s = '0' + s; return s; }
+  function todayText() { return new Date().toLocaleDateString('en-US'); }
+  function startOfToday() { var d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+  function isoToUs(v) { var m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? (+m[2]) + '/' + (+m[3]) + '/' + m[1] : ''; }
   function safeUrl(u) {
     try {
       var x = new URL(u, location.href);
@@ -84,13 +99,15 @@
   function table(values) {
     if (!values || !values.length) return [];
     var head = values[0].map(function (s) { return String(s == null ? '' : s).trim(); });
-    return values.slice(1).map(function (r, i) {
+    var rows = values.slice(1).map(function (r, i) {
       var o = { _row: i + 2 };
       head.forEach(function (k, j) { if (k && o[k] === undefined) o[k] = r[j] == null ? '' : String(r[j]).trim(); });
       return o;
     }).filter(function (o) {
       return Object.keys(o).some(function (k) { return k !== '_row' && o[k] !== ''; });
     });
+    rows.head = head;
+    return rows;
   }
   function waitFor(test, ms) {
     return new Promise(function (resolve, reject) {
@@ -128,9 +145,12 @@
     if (state.token && Date.now() < state.expires) return Promise.resolve();
     return requestToken('');
   }
-  function api(url) {
+  function api(url, opts) {
+    opts = opts || {};
     return ensureToken().then(function () {
-      return fetch(url, { headers: { Authorization: 'Bearer ' + state.token } });
+      var init = { method: opts.method || 'GET', headers: { Authorization: 'Bearer ' + state.token } };
+      if (opts.body !== undefined) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(opts.body); }
+      return fetch(url, init);
     }).then(function (r) {
       if (r.ok) return r.json();
       return r.json().catch(function () { return {}; }).then(function (j) {
@@ -155,7 +175,7 @@
   }
 
   /* ---------- Picker ---------- */
-  function pickSheet() {
+  function pickSheet(title) {
     return ensureToken().then(function () {
       return waitFor(function () { return window.gapi; });
     }).then(function () {
@@ -167,7 +187,7 @@
         var picker = new google.picker.PickerBuilder()
           .addView(mine).addView(shared)
           .setOAuthToken(state.token).setDeveloperKey(C.API_KEY).setAppId(C.PROJECT_NUMBER)
-          .setTitle('Choose your planning sheet')
+          .setTitle(title || 'Choose your sheet')
           .setCallback(function (d) {
             if (d.action === google.picker.Action.PICKED) resolve({ id: d.docs[0].id, name: d.docs[0].name });
             else if (d.action === google.picker.Action.CANCEL) resolve(null);
@@ -199,32 +219,158 @@
   }
   function homeName(x) { return (x.builder + (x.model ? ': ' + x.model : '')).trim() || x.id; }
 
-  function loadAll() {
-    state.busy = true; state.error = null; render();
-    var id = state.sheet && encodeURIComponent(state.sheet.id);
-    var p = Promise.resolve();
-    if (!state.user) {
-      p = api('https://www.googleapis.com/oauth2/v3/userinfo').then(function (u) { state.user = u; });
-    }
-    return p.then(function () {
-      return api('https://www.googleapis.com/drive/v3/files/' + id + '?fields=name,capabilities(canEdit)&supportsAllDrives=true')
-        .then(function (f) { state.sheet.name = f.name; state.role = f.capabilities && f.capabilities.canEdit ? 'editor' : 'viewer'; saveSheet(state.sheet); })
-        .catch(function (e) { if (e.status === 404) throw e; state.role = 'unknown'; });
-    }).then(function () {
-      var ranges = Object.keys(TABS).map(function (k) { return 'ranges=' + encodeURIComponent("'" + TABS[k] + "'"); }).join('&');
+
+  function buildTasks(rows) {
+    return rows.filter(function (r) { return r['Task ID'] || r['Title']; }).map(function (r) {
+      var s = String(r['Status'] || '').trim().toLowerCase();
+      return {
+        id: r['Task ID'] || '', row: r._row, stream: r['Workstream'] || 'Other', title: r['Title'] || '',
+        owner: r['Owner'] || '', due: parseDate(r['Due date']), dueText: r['Due date'] || '',
+        status: s === 'done' ? 'Done' : s === 'in progress' ? 'In progress' : s === 'skipped' ? 'Skipped' : 'To do',
+        notes: r['Notes'] || '', completedOn: r['Completed on'] || '', completedBy: r['Completed by'] || ''
+      };
+    });
+  }
+  function buildDecisions(rows) {
+    return rows.filter(function (r) { return r['Decision ID'] || r['Decision']; }).map(function (r) {
+      var s = String(r['Status'] || '').trim().toLowerCase();
+      return {
+        id: r['Decision ID'] || '', row: r._row, title: r['Decision'] || '', stream: r['Workstream'] || '',
+        options: r['Options'] || '', owners: r['Owners'] || '', cfp: /^y/i.test(r['CFP input needed'] || ''),
+        status: s === 'decided' ? 'Decided' : s === 'deferred' ? 'Deferred' : 'Open',
+        decidedOn: r['Decided on'] || '', reasoning: r['Reasoning'] || '', loggedBy: r['Logged by'] || ''
+      };
+    });
+  }
+
+  function fetchRole(file) {
+    return api('https://www.googleapis.com/drive/v3/files/' + enc(file.id) + '?fields=name,capabilities(canEdit)&supportsAllDrives=true')
+      .then(function (f) { file.name = f.name; return f.capabilities && f.capabilities.canEdit ? 'editor' : 'viewer'; })
+      .catch(function (e) { if (e.status === 404) throw e; return 'unknown'; });
+  }
+
+  function loadHome() {
+    var id = enc(state.sheet.id);
+    return fetchRole(state.sheet).then(function (r) {
+      state.role = r; saveStore(HOME_KEY, state.sheet);
+      var ranges = Object.keys(TABS).map(function (k) { return 'ranges=' + enc("'" + TABS[k] + "'"); }).join('&');
       return api('https://sheets.googleapis.com/v4/spreadsheets/' + id + '/values:batchGet?' + ranges + '&majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE');
     }).then(function (j) {
       var keys = Object.keys(TABS), by = {};
       (j.valueRanges || []).forEach(function (vr, i) { by[keys[i]] = table(vr.values); });
-      return api('https://sheets.googleapis.com/v4/spreadsheets/' + id + '/values/' + encodeURIComponent("'" + DOCS_TAB + "'") + '?valueRenderOption=FORMATTED_VALUE')
+      return api('https://sheets.googleapis.com/v4/spreadsheets/' + id + '/values/' + enc("'" + DOCS_TAB + "'") + '?valueRenderOption=FORMATTED_VALUE')
         .then(function (d) { by.docs = table(d.values); })
         .catch(function () { by.docs = null; })
         .then(function () { return by; });
     }).then(function (by) {
       state.data = { homes: buildHomes(by), tours: by.tours || [], contacts: by.contacts || [], docs: by.docs };
-      state.loadedAt = new Date();
-    }).catch(function (e) { state.error = explain(e); })
+    });
+  }
+
+  function loadPlan() {
+    if (!state.plan) { state.planData = null; state.planError = null; return Promise.resolve(); }
+    var id = enc(state.plan.id);
+    state.planError = null;
+    return fetchRole(state.plan).then(function (r) {
+      state.planRole = r; saveStore(PLAN_KEY, state.plan);
+      var keys = Object.keys(PLAN_TABS);
+      var ranges = keys.map(function (k) { return 'ranges=' + enc("'" + PLAN_TABS[k] + "'"); }).join('&');
+      return api('https://sheets.googleapis.com/v4/spreadsheets/' + id + '/values:batchGet?' + ranges + '&majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE');
+    }).then(function (j) {
+      var keys = Object.keys(PLAN_TABS), by = {};
+      (j.valueRanges || []).forEach(function (vr, i) { by[keys[i]] = table(vr.values); });
+      var tasks = by.tasks || [], decisions = by.decisions || [];
+      state.planData = {
+        tasks: buildTasks(tasks), decisions: buildDecisions(decisions),
+        streams: (by.streams || []).map(function (r) { return r['Workstream']; }).filter(Boolean),
+        heads: { tasks: tasks.head || [], decisions: decisions.head || [] }
+      };
+    }).catch(function (e) { state.planData = null; state.planError = explain(e); });
+  }
+
+  function loadAll() {
+    state.busy = true; state.error = null; render();
+    var p = Promise.resolve();
+    if (!state.user) p = api('https://www.googleapis.com/oauth2/v3/userinfo').then(function (u) { state.user = u; });
+    if (state.sheet) p = p.then(loadHome);
+    return p.then(loadPlan)
+      .then(function () { state.loadedAt = new Date(); })
+      .catch(function (e) { state.error = explain(e); })
       .then(function () { state.busy = false; render(); });
+  }
+
+  /* ---------- writing to the planning sheet (editors only; Google enforces this) ---------- */
+  function who() { return (state.user && (state.user.given_name || state.user.email)) || ''; }
+  function canEditPlan() { return state.planRole === 'editor'; }
+  function sheetsBase() { return 'https://sheets.googleapis.com/v4/spreadsheets/' + enc(state.plan.id); }
+  function readCell(tab, a1) {
+    return api(sheetsBase() + '/values/' + enc("'" + tab + "'!" + a1)).then(function (j) { return j.values && j.values[0] ? String(j.values[0][0]) : ''; });
+  }
+  function writeCells(data) {
+    return api(sheetsBase() + '/values:batchUpdate', { method: 'POST', body: { valueInputOption: 'USER_ENTERED', data: data } });
+  }
+  function appendRow(tab, values) {
+    return api(sheetsBase() + '/values/' + enc("'" + tab + "'!A1") + ':append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS', { method: 'POST', body: { values: [values] } });
+  }
+  function guardRow(tab, head, idName, id, row) {
+    var i = head.indexOf(idName);
+    if (i < 0 || !id) return Promise.resolve();
+    return readCell(tab, colLetter(i) + row).then(function (v) {
+      if (v !== id) throw new Error('The sheet changed since it was loaded. Runway refreshed it. Please try again.');
+    });
+  }
+  function cell(tab, head, name, row, value) {
+    var i = head.indexOf(name);
+    return i < 0 ? null : { range: "'" + tab + "'!" + colLetter(i) + row, values: [[value]] };
+  }
+  function rowFrom(head, obj) { return head.map(function (k) { return obj[k] === undefined ? '' : obj[k]; }); }
+  function nextId(items, prefix) {
+    var max = 0;
+    items.forEach(function (x) { var m = String(x.id).match(/(\d+)$/); if (m) max = Math.max(max, +m[1]); });
+    return prefix + '-' + pad(max + 1, 3);
+  }
+
+  function setTaskStatus(t, status) {
+    var head = state.planData.heads.tasks;
+    if (head.indexOf('Status') < 0) return Promise.reject(new Error('The Tasks tab needs a Status column.'));
+    var done = status === 'Done';
+    var data = [cell('Tasks', head, 'Status', t.row, status),
+      cell('Tasks', head, 'Completed on', t.row, done ? todayText() : ''),
+      cell('Tasks', head, 'Completed by', t.row, done ? who() : '')].filter(Boolean);
+    return guardRow('Tasks', head, 'Task ID', t.id, t.row).then(function () { return writeCells(data); }).then(function () {
+      t.status = status; t.completedOn = done ? todayText() : ''; t.completedBy = done ? who() : '';
+    });
+  }
+  function addTask(f) {
+    var P = state.planData;
+    var obj = { 'Task ID': nextId(P.tasks, 'T'), 'Workstream': f.stream, 'Title': f.title, 'Owner': f.owner, 'Due date': isoToUs(f.due), 'Status': 'To do', 'Notes': f.notes };
+    return appendRow('Tasks', rowFrom(P.heads.tasks, obj)).then(loadPlan);
+  }
+  function addDecision(f) {
+    var P = state.planData;
+    var obj = { 'Decision ID': nextId(P.decisions, 'D'), 'Decision': f.title, 'Workstream': f.stream, 'Options': f.options, 'Owners': f.owners, 'CFP input needed': f.cfp, 'Status': 'Open', 'Logged by': who() };
+    return appendRow('Decisions', rowFrom(P.heads.decisions, obj)).then(loadPlan);
+  }
+  function markDecided(d, reasoning) {
+    var head = state.planData.heads.decisions;
+    var data = [cell('Decisions', head, 'Status', d.row, 'Decided'), cell('Decisions', head, 'Decided on', d.row, todayText()),
+      cell('Decisions', head, 'Reasoning', d.row, reasoning)].filter(Boolean);
+    return guardRow('Decisions', head, 'Decision ID', d.id, d.row).then(function () { return writeCells(data); }).then(function () {
+      d.status = 'Decided'; d.decidedOn = todayText(); d.reasoning = reasoning;
+    });
+  }
+  function toast(text, bad) {
+    state.toast = { text: text, bad: !!bad }; render();
+    setTimeout(function () { state.toast = null; render(); }, 4500);
+  }
+  function save(promise, okText) {
+    state.saving = true; render();
+    return promise.then(function () { state.saving = false; toast(okText); })
+      .catch(function (e) {
+        state.saving = false;
+        var msg = e && e.message ? e.message : 'Could not save.';
+        if (/changed since/.test(msg)) loadPlan().then(function () { toast(msg, true); }); else toast(msg, true);
+      });
   }
 
   /* ---------- actions ---------- */
@@ -236,25 +382,54 @@
       render();
     }).catch(function (e) { state.error = { title: 'Sign-in did not finish', body: e.message }; render(); });
   }
-  function doPick() {
-    pickSheet().then(function (s) {
+  function choose(title, key, setter) {
+    pickSheet(title).then(function (s) {
       if (!s) return;
-      state.sheet = s; state.data = null; saveSheet(s);
+      setter(s); saveStore(key, s);
       return loadAll();
     }).catch(function (e) { state.error = explain(e); render(); });
   }
+  function doPick() { choose('Choose your home-search sheet', HOME_KEY, function (s) { state.sheet = s; state.data = null; }); }
+  function doPickPlan() { choose('Choose your Runway planning sheet', PLAN_KEY, function (s) { state.plan = s; state.planData = null; state.planRole = null; }); }
   function doSignOut() {
     var t = state.token;
-    state.token = null; state.expires = 0; state.user = null; state.data = null; state.role = null; state.needSignIn = true; state.error = null;
+    state.token = null; state.expires = 0; state.user = null; state.data = null; state.planData = null;
+    state.role = null; state.planRole = null; state.needSignIn = true; state.error = null; state.planError = null;
     try { if (t && window.google && google.accounts) google.accounts.oauth2.revoke(t, function () {}); } catch (e) { /* ignore */ }
     render();
   }
 
-  /* ---------- views ---------- */
   function tagFor(status) { return h('span', { class: 'tag' + (status === 'Active' ? ' active' : status === 'To tour' ? ' warn' : '') }, status); }
 
+  /* ---------- views ---------- */
+  function connectCard(what) {
+    return h('section', { class: 'card stack' },
+      h('h2', null, 'Connect the Runway planning sheet'),
+      h('p', { class: 'muted' }, what + ' live in a separate planning sheet. Choose it once and Runway remembers it on this device.'),
+      h('button', { class: 'btn', type: 'button', onclick: doPickPlan, style: 'align-self:flex-start' }, 'Choose planning sheet'));
+  }
+  function pageHead(title, lede) { return h('div', null, h('h1', null, title), lede ? h('p', { class: 'lede' }, lede) : null); }
+  function planProblem() {
+    if (!state.plan) return null;
+    return state.planError ? h('div', { class: 'alert', role: 'alert' }, h('strong', null, state.planError.title), h('span', null, state.planError.body)) : null;
+  }
+  function bar(done, total) {
+    var wrap = h('div', { class: 'meter', role: 'img', 'aria-label': done + ' of ' + total + ' done' }, h('i', null));
+    wrap.firstChild.style.width = (total ? Math.round(done / total * 100) : 0) + '%';
+    return wrap;
+  }
+  function dueTag(t) {
+    if (!t.due || t.status === 'Done' || t.status === 'Skipped') return null;
+    return t.due < startOfToday() ? h('span', { class: 'tag warn' }, 'Overdue') : null;
+  }
+  function openTasksSorted(tasks) {
+    return tasks.filter(function (t) { return t.status !== 'Done' && t.status !== 'Skipped'; }).sort(function (a, b) {
+      return (a.due ? a.due.getTime() : 9e15) - (b.due ? b.due.getTime() : 9e15);
+    });
+  }
+
   function viewOverview() {
-    var d = state.data, homes = d.homes;
+    var d = state.data, homes = d.homes, P = state.planData;
     var target = new Date(C.TARGET_DATE + 'T00:00:00Z');
     var days = Math.ceil((target - Date.now()) / 864e5);
     var months = Math.max(0, Math.round(days / 30.44));
@@ -269,33 +444,54 @@
     var toTour = homes.filter(function (x) { return x.status === 'To tour'; });
     var follow = d.contacts.filter(function (c) { return /^y/i.test(col(c, /^action required/i)); });
 
+    var done = P ? P.tasks.filter(function (t) { return t.status === 'Done'; }).length : 0;
+    var total = P ? P.tasks.length : 0;
+    var nextUp = P ? openTasksSorted(P.tasks).slice(0, 5) : [];
+    var openDecisions = P ? P.decisions.filter(function (x) { return x.status === 'Open'; }) : [];
+
+    var hero = h('section', { class: 'card hero stack' },
+      h('div', { class: 'small' }, 'Target date'),
+      h('div', { class: 'big' }, label),
+      h('div', null, days > 0 ? 'About ' + months + (months === 1 ? ' month' : ' months') + ' to go (' + days + ' days)' : 'The target date has arrived.'),
+      P && total ? h('div', { class: 'stack', style: 'gap:6px' }, bar(done, total), h('div', { class: 'small' }, done + ' of ' + total + ' tasks done')) : null);
+
+    var plan = !state.plan ? connectCard('Tasks and decisions')
+      : state.planError ? planProblem()
+      : h('div', { class: 'row' },
+        h('section', { class: 'card col stack' }, h('h2', null, 'Next up'),
+          nextUp.length ? h('ul', { class: 'list' }, nextUp.map(function (t) {
+            return h('li', null, h('strong', null, t.title),
+              h('div', { class: 'muted small' }, [t.stream, t.owner, t.dueText ? 'Due ' + t.dueText : ''].filter(Boolean).join(' | '), ' ', dueTag(t)));
+          })) : h('p', { class: 'muted' }, 'Nothing open. Add tasks on the Tasks page.'),
+          h('a', { class: 'btn ghost small', href: '#/tasks', style: 'align-self:flex-start' }, 'All tasks')),
+        h('section', { class: 'card col stack' }, h('h2', null, 'Open decisions'),
+          openDecisions.length ? h('ul', { class: 'list' }, openDecisions.map(function (x) {
+            return h('li', null, h('strong', null, x.title),
+              h('div', { class: 'muted small' }, [x.owners, x.cfp ? 'Needs CFP input' : ''].filter(Boolean).join(' | ')));
+          })) : h('p', { class: 'muted' }, 'No open decisions.'),
+          h('a', { class: 'btn ghost small', href: '#/decisions', style: 'align-self:flex-start' }, 'All decisions')));
+
     return h('div', { class: 'stack' },
-      h('div', null, h('h1', null, 'Overview'), h('p', { class: 'lede' }, 'Where things stand today.')),
+      pageHead('Overview', 'Where things stand today.'),
       h('div', { class: 'row' },
-        h('section', { class: 'card hero stack' },
-          h('div', { class: 'small' }, 'Target date'),
-          h('div', { class: 'big' }, label),
-          h('div', null, days > 0 ? 'About ' + months + (months === 1 ? ' month' : ' months') + ' to go (' + days + ' days)' : 'The target date has arrived.')
-        ),
+        hero,
         h('section', { class: 'card col stack' },
           h('h2', null, 'Housing at a glance'),
           h('div', { class: 'chips' }, statuses.map(function (s) {
             return h('button', { class: 'chip', type: 'button', 'aria-pressed': 'false', onclick: function () { state.filter = s; go('housing'); } }, s + ' (' + counts[s] + ')');
           })),
           homes.length ? null : h('p', { class: 'muted' }, 'No homes with a Home ID yet. Add IDs in the Home Listing tab.'),
-          h('a', { class: 'btn ghost small', href: '#/housing', style: 'align-self:flex-start' }, 'See all homes')
-        )
-      ),
+          h('a', { class: 'btn ghost small', href: '#/housing', style: 'align-self:flex-start' }, 'See all homes'))),
+      plan,
       h('div', { class: 'row' },
         h('section', { class: 'card col stack' },
           h('h2', null, 'Active candidates'),
           active.length ? h('ul', { class: 'list' }, active.map(function (x) {
             return h('li', null,
-              h('div', { class: 'head', style: 'display:flex;justify-content:space-between;gap:12px' }, h('strong', null, homeName(x)), h('span', null, money(x.price))),
+              h('div', { style: 'display:flex;justify-content:space-between;gap:12px' }, h('strong', null, homeName(x)), h('span', null, money(x.price))),
               h('div', { class: 'muted small' }, [x.community, x.city].filter(Boolean).join(', ')),
               h('div', { class: 'small' }, x.visit ? 'Toured ' + x.visit : 'Not toured yet'));
-          })) : h('p', { class: 'muted' }, 'No homes marked Active.')
-        ),
+          })) : h('p', { class: 'muted' }, 'No homes marked Active.')),
         h('section', { class: 'card col stack' },
           h('h2', null, 'Open follow-ups'),
           follow.length ? h('ul', { class: 'list' }, follow.map(function (c) {
@@ -305,10 +501,115 @@
               col(c, /^due date/i) ? h('div', { class: 'small' }, 'Due ' + col(c, /^due date/i)) : null);
           })) : h('p', { class: 'muted' }, 'No follow-ups marked Yes in the Contacts Log.'),
           toTour.length ? h('div', { class: 'stack' }, h('h3', null, 'Homes to tour'),
-            h('ul', { class: 'list' }, toTour.map(function (x) { return h('li', null, homeName(x), h('span', { class: 'muted small' }, ' (' + [x.community, x.city].filter(Boolean).join(', ') + ')')); }))) : null
-        )
-      )
+            h('ul', { class: 'list' }, toTour.map(function (x) { return h('li', null, homeName(x), h('span', { class: 'muted small' }, ' (' + [x.community, x.city].filter(Boolean).join(', ') + ')')); }))) : null))
     );
+  }
+
+  /* ----- Tasks ----- */
+  function field(label, control) { return h('label', { class: 'fld' }, h('span', null, label), control); }
+  function taskRow(t) {
+    var done = t.status === 'Done';
+    var box = h('input', {
+      type: 'checkbox', checked: done ? true : null, disabled: (!canEditPlan() || state.saving) ? true : null,
+      'aria-label': (done ? 'Mark not done: ' : 'Mark done: ') + t.title,
+      onchange: function (e) { var on = e.target.checked; save(setTaskStatus(t, on ? 'Done' : 'To do'), on ? 'Marked done' : 'Marked not done'); }
+    });
+    return h('li', { class: 'task' + (done ? ' done' : '') },
+      box,
+      h('div', { class: 'tbody' },
+        h('div', { class: 'ttitle' }, t.title),
+        h('div', { class: 'muted small' }, [t.owner, t.dueText ? 'Due ' + t.dueText : '', t.status === 'In progress' ? 'In progress' : '', t.status === 'Skipped' ? 'Skipped' : '',
+          done && t.completedOn ? 'Done ' + t.completedOn + (t.completedBy ? ' by ' + t.completedBy : '') : ''].filter(Boolean).join(' | '), ' ', dueTag(t)),
+        t.notes ? h('div', { class: 'small' }, t.notes) : null));
+  }
+  function addTaskForm(P) {
+    var title = h('input', { type: 'text', maxlength: '200', placeholder: 'What needs doing' });
+    var stream = h('select', null, (P.streams.length ? P.streams : ['Other']).map(function (s) { return h('option', { value: s }, s); }));
+    var owner = h('input', { type: 'text', list: 'owners', maxlength: '40' });
+    var owners = {}; P.tasks.forEach(function (t) { if (t.owner) owners[t.owner] = true; });
+    var dl = h('datalist', { id: 'owners' }, Object.keys(owners).map(function (o) { return h('option', { value: o }); }));
+    var due = h('input', { type: 'date' });
+    var notes = h('input', { type: 'text', maxlength: '300' });
+    return h('details', { class: 'card addform' }, h('summary', null, 'Add a task'),
+      h('div', { class: 'stack', style: 'margin-top:14px' },
+        field('Task', title), field('Workstream', stream), field('Owner', owner), dl, field('Due date (optional)', due), field('Notes (optional)', notes),
+        h('button', { class: 'btn', type: 'button', style: 'align-self:flex-start', disabled: state.saving ? true : null, onclick: function () {
+          if (!title.value.trim()) { toast('Give the task a title.', true); return; }
+          save(addTask({ title: title.value.trim(), stream: stream.value, owner: owner.value.trim(), due: due.value, notes: notes.value.trim() }), 'Task added');
+        } }, 'Add task')));
+  }
+  function viewTasks() {
+    var head = pageHead('Tasks', 'The checklist for the road ahead, grouped by workstream.');
+    if (!state.plan) return h('div', { class: 'stack' }, head, connectCard('Tasks and decisions'));
+    if (state.planError) return h('div', { class: 'stack' }, head, planProblem());
+    var P = state.planData; if (!P) return h('div', { class: 'stack' }, head);
+    var names = P.streams.slice();
+    P.tasks.forEach(function (t) { if (names.indexOf(t.stream) < 0) names.push(t.stream); });
+    if (names.indexOf(state.taskStream) < 0) state.taskStream = 'All';
+    var chips = ['All'].concat(names).map(function (n) {
+      return h('button', { class: 'chip', type: 'button', 'aria-pressed': String(state.taskStream === n), onclick: function () { state.taskStream = n; render(); } }, n);
+    });
+    var sections = names.filter(function (n) { return state.taskStream === 'All' || state.taskStream === n; }).map(function (n) {
+      var all = P.tasks.filter(function (t) { return t.stream === n; });
+      var done = all.filter(function (t) { return t.status === 'Done'; }).length;
+      var shown = all.filter(function (t) { return state.showDone || t.status !== 'Done'; }).sort(function (a, b) {
+        return (a.due ? a.due.getTime() : 9e15) - (b.due ? b.due.getTime() : 9e15);
+      });
+      if (!all.length) return null;
+      return h('section', { class: 'card stack' },
+        h('div', { class: 'sechead' }, h('h2', null, n), h('span', { class: 'muted small' }, done + ' of ' + all.length + ' done')),
+        bar(done, all.length),
+        shown.length ? h('ul', { class: 'tasks' }, shown.map(taskRow)) : h('p', { class: 'muted' }, 'Everything here is done.'));
+    });
+    return h('div', { class: 'stack' }, head,
+      canEditPlan() ? null : h('p', { class: 'muted small' }, 'You can see every task. Only people with edit access to the planning sheet can change them.'),
+      h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by workstream' }, chips,
+        h('button', { class: 'chip', type: 'button', 'aria-pressed': String(state.showDone), onclick: function () { state.showDone = !state.showDone; render(); } }, 'Show done')),
+      sections,
+      canEditPlan() ? addTaskForm(P) : null);
+  }
+
+  /* ----- Decisions ----- */
+  function decisionCard(x) {
+    var reason = h('textarea', { rows: '3', maxlength: '1000', placeholder: 'What was decided, and why' });
+    return h('section', { class: 'card stack' },
+      h('div', { class: 'sechead' }, h('h2', null, x.title),
+        h('span', { class: 'tag' + (x.status === 'Open' ? ' warn' : x.status === 'Decided' ? ' active' : '') }, x.status)),
+      h('div', { class: 'muted small' }, [x.stream, x.owners, x.cfp ? 'Needs CFP input' : ''].filter(Boolean).join(' | ')),
+      x.options ? h('p', null, h('strong', null, 'Options: '), x.options) : null,
+      x.status === 'Decided' ? h('p', null, h('strong', null, 'Decided' + (x.decidedOn ? ' ' + x.decidedOn : '') + ': '), x.reasoning || '') : null,
+      x.status !== 'Decided' && canEditPlan() ? h('details', null, h('summary', null, 'Mark as decided'),
+        h('div', { class: 'stack', style: 'margin-top:12px' }, field('Reasoning', reason),
+          h('button', { class: 'btn small', type: 'button', style: 'align-self:flex-start', disabled: state.saving ? true : null, onclick: function () {
+            if (!reason.value.trim()) { toast('Add the reasoning first.', true); return; }
+            save(markDecided(x, reason.value.trim()), 'Decision recorded');
+          } }, 'Save decision'))) : null);
+  }
+  function addDecisionForm(P) {
+    var title = h('input', { type: 'text', maxlength: '200' });
+    var stream = h('select', null, (P.streams.length ? P.streams : ['Other']).map(function (s) { return h('option', { value: s }, s); }));
+    var options = h('input', { type: 'text', maxlength: '400' });
+    var owners = h('input', { type: 'text', maxlength: '80' });
+    var cfp = h('select', null, h('option', { value: 'No' }, 'No'), h('option', { value: 'Yes' }, 'Yes'));
+    return h('details', { class: 'card addform' }, h('summary', null, 'Add a decision'),
+      h('div', { class: 'stack', style: 'margin-top:14px' },
+        field('Decision', title), field('Workstream', stream), field('Options (optional)', options), field('Who decides', owners), field('Needs CFP input', cfp),
+        h('button', { class: 'btn', type: 'button', style: 'align-self:flex-start', disabled: state.saving ? true : null, onclick: function () {
+          if (!title.value.trim()) { toast('Give the decision a title.', true); return; }
+          save(addDecision({ title: title.value.trim(), stream: stream.value, options: options.value.trim(), owners: owners.value.trim(), cfp: cfp.value }), 'Decision added');
+        } }, 'Add decision')));
+  }
+  function viewDecisions() {
+    var head = pageHead('Decisions', 'What is still open, and what has been settled and why.');
+    if (!state.plan) return h('div', { class: 'stack' }, head, connectCard('Tasks and decisions'));
+    if (state.planError) return h('div', { class: 'stack' }, head, planProblem());
+    var P = state.planData; if (!P) return h('div', { class: 'stack' }, head);
+    var order = { Open: 0, Deferred: 1, Decided: 2 };
+    var list = P.decisions.slice().sort(function (a, b) { return order[a.status] - order[b.status]; });
+    return h('div', { class: 'stack' }, head,
+      canEditPlan() ? null : h('p', { class: 'muted small' }, 'You can see every decision. Only people with edit access to the planning sheet can change them.'),
+      list.length ? list.map(decisionCard) : h('p', { class: 'muted' }, 'No decisions yet.'),
+      canEditPlan() ? addDecisionForm(P) : null);
   }
 
   function fact(label, value) {
@@ -380,6 +681,16 @@
       ev.push({ date: dt, tag: 'Contact', title: c['Subject'] || 'Contact',
         detail: [c['Contact Name'], c['Builder']].filter(Boolean).join(', ') + (c['Summary'] ? ': ' + c['Summary'] : '') });
     });
+    if (state.planData) {
+      state.planData.tasks.forEach(function (t) {
+        var dt = t.status === 'Done' ? parseDate(t.completedOn) : null;
+        if (dt) ev.push({ date: dt, tag: 'Task', title: 'Done: ' + t.title, detail: [t.stream, t.completedBy ? 'by ' + t.completedBy : ''].filter(Boolean).join(', ') });
+      });
+      state.planData.decisions.forEach(function (x) {
+        var dt = x.status === 'Decided' ? parseDate(x.decidedOn) : null;
+        if (dt) ev.push({ date: dt, tag: 'Decision', title: 'Decided: ' + x.title, detail: x.reasoning });
+      });
+    }
     var target = new Date(C.TARGET_DATE + 'T00:00:00');
     ev.push({ date: target, tag: 'Milestone', title: 'Target date', detail: '' });
     ev.sort(function (a, b) { return a.date - b.date; });
@@ -395,9 +706,8 @@
       rows.push(row(e, e.date > now ? 'future' : ''));
     });
     return h('div', { class: 'stack' },
-      h('div', null, h('h1', null, 'Chronology'), h('p', { class: 'lede' }, 'The journey in order. Tours and builder contacts come from your sheet. More event types arrive as Runway grows.')),
-      h('section', { class: 'card' }, h('div', { class: 'tl' }, rows))
-    );
+      pageHead('Chronology', 'The journey in order: tours, builder contacts, finished tasks and decisions.'),
+      h('section', { class: 'card' }, h('div', { class: 'tl' }, rows)));
   }
 
   function viewDocuments() {
@@ -417,14 +727,34 @@
         })))));
   }
 
+  function viewSheets() {
+    function row(title, file, onChange, role, extra) {
+      return h('section', { class: 'card stack' }, h('h2', null, title),
+        file ? h('p', null, h('strong', null, file.name || 'Chosen sheet'), role ? h('span', { class: 'tag', style: 'margin-left:8px' }, role === 'editor' ? 'You can edit' : role === 'viewer' ? 'View only' : 'Role unknown') : null) : h('p', { class: 'muted' }, 'Not connected.'),
+        extra || null,
+        h('div', { class: 'chips' }, h('button', { class: 'btn small', type: 'button', onclick: onChange }, file ? 'Change sheet' : 'Choose sheet'),
+          file ? h('a', { class: 'btn ghost small', href: 'https://docs.google.com/spreadsheets/d/' + enc(file.id) + '/edit', target: '_blank', rel: 'noopener noreferrer' }, 'Open in Google Sheets') : null));
+    }
+    return h('div', { class: 'stack' }, pageHead('Sheets', 'The two Google Sheets Runway reads. Runway can open only the files you choose here.'),
+      row('Home-search sheet', state.sheet, doPick, state.role),
+      row('Runway planning sheet', state.plan, doPickPlan, state.planRole),
+      h('section', { class: 'card stack' }, h('h2', null, 'About'),
+        h('p', null, 'Runway version ' + APP_VERSION), h('p', null, h('a', { href: 'privacy.html' }, 'Privacy policy'))));
+  }
+
   /* ---------- shell ---------- */
-  var ROUTES = { overview: ['Overview', viewOverview], housing: ['Housing', viewHousing], chronology: ['Chronology', viewChronology], documents: ['Documents', viewDocuments] };
+  var ROUTES = {
+    overview: ['Overview', viewOverview], tasks: ['Tasks', viewTasks], decisions: ['Decisions', viewDecisions],
+    housing: ['Housing', viewHousing], chronology: ['Chronology', viewChronology], documents: ['Documents', viewDocuments], sheets: ['Sheets', viewSheets]
+  };
+  var NAV = ['overview', 'tasks', 'decisions', 'housing', 'chronology', 'documents'];
 
   function go(r) { location.hash = '#/' + r; }
   function readRoute() {
     var r = (location.hash || '').replace(/^#\/?/, '');
     state.route = ROUTES[r] ? r : 'overview';
   }
+
   function logo() {
     var ns = 'http://www.w3.org/2000/svg';
     var svg = document.createElementNS(ns, 'svg');
@@ -447,7 +777,7 @@
     return h('div', { class: 'center' }, h('div', { class: 'box' },
       h('div', { class: 'brand' }, logo(), 'Runway'),
       h('h1', null, 'One shared plan for what comes next.'),
-      h('p', { class: 'muted' }, 'Sign in with the Google account the owner shared Runway with. Runway reads only the sheet you choose.'),
+      h('p', { class: 'muted' }, 'Sign in with the Google account the owner shared Runway with. Runway reads only the sheets you choose.'),
       h('button', { class: 'btn', type: 'button', onclick: function () { doSignIn(''); } }, 'Continue with Google'),
       errorBox(),
       h('p', { class: 'muted small' }, 'Private. Invitation only. ', h('a', { href: 'privacy.html' }, 'Privacy policy'))));
@@ -456,49 +786,55 @@
     return h('div', { class: 'center' }, h('div', { class: 'box' },
       h('div', { class: 'brand' }, logo(), 'Runway'),
       h('h1', null, 'Choose your sheet'),
-      h('p', { class: 'muted' }, 'Pick your planning sheet once. Runway remembers the choice on this device and can open only that file.'),
+      h('p', { class: 'muted' }, 'Pick your home-search sheet once. Runway remembers the choice on this device and can open only the files you choose.'),
       h('button', { class: 'btn', type: 'button', onclick: doPick }, 'Choose sheet'),
       errorBox(),
       h('button', { class: 'btn ghost small', type: 'button', onclick: doSignOut }, 'Sign out')));
   }
   function screenLoading() {
-    return h('div', { class: 'center' }, h('div', { class: 'spin', role: 'status', 'aria-label': 'Loading' }), h('p', { class: 'muted' }, 'Loading your sheet'));
+    return h('div', { class: 'center' }, h('div', { class: 'spin', role: 'status', 'aria-label': 'Loading' }), h('p', { class: 'muted' }, 'Loading your sheets'));
+  }
+
+  function effectiveRole() {
+    if (state.role === 'viewer' || (state.plan && state.planRole === 'viewer')) return 'viewer';
+    if (state.role === 'editor' && (!state.plan || state.planRole === 'editor')) return 'editor';
+    return 'unknown';
   }
 
   function screenApp() {
     var name = (state.user && (state.user.given_name || state.user.email)) || 'you';
-    var banner = null;
-    if (state.role === 'viewer') {
+    var role = effectiveRole(), banner = null;
+    if (role === 'viewer') {
       banner = h('div', { class: 'banner', role: 'status' }, h('div', { class: 'in' },
         h('strong', null, 'View only.'), h('span', null, 'You\'re signed in as ' + name + '. You can see everything in Runway. Only the sheet\'s owner and editors can make changes.'),
         h('span', { class: 'pill' }, 'Role: viewer')));
-    } else if (state.role === 'unknown') {
+    } else if (role === 'unknown') {
       banner = h('div', { class: 'banner', role: 'status' }, h('div', { class: 'in' },
-        h('span', null, 'Runway could not confirm whether you can edit this sheet. This version is read-only either way.')));
+        h('span', null, 'Runway could not confirm whether you can edit. Changes are blocked unless Google confirms your access.')));
     }
-    var links = Object.keys(ROUTES).map(function (k) {
-      return h('a', { href: '#/' + k, 'aria-current': state.route === k ? 'page' : null }, ROUTES[k][0]);
-    });
+    var links = NAV.map(function (k) { return h('a', { href: '#/' + k, 'aria-current': state.route === k ? 'page' : null }, ROUTES[k][0]); });
     var top = h('header', { class: 'top' }, h('div', { class: 'in' },
       h('div', { class: 'brand' }, logo(), 'Runway'),
       h('nav', { 'aria-label': 'Main' }, links),
       h('div', { class: 'who' },
         state.user ? h('span', null, state.user.email) : null,
-        state.role === 'editor' ? h('span', { class: 'pill' }, 'Role: editor') : null,
+        role === 'editor' ? h('span', { class: 'pill' }, 'Role: editor') : null,
         h('button', { class: 'btn ghost small', type: 'button', onclick: loadAll }, 'Refresh'),
-        h('button', { class: 'btn ghost small', type: 'button', onclick: doPick }, 'Change sheet'),
+        h('button', { class: 'btn ghost small', type: 'button', onclick: function () { go('sheets'); } }, 'Sheets'),
         h('button', { class: 'btn ghost small', type: 'button', onclick: doSignOut }, 'Sign out'))));
     var content = state.error ? errorBox() : (state.data ? ROUTES[state.route][1]() : null);
     var foot = h('div', { class: 'foot' },
+      'Runway v' + APP_VERSION + '. ',
       state.loadedAt ? 'Loaded ' + state.loadedAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) + '. ' : '',
-      'This version is read-only. Make changes in the sheet or its Forms. ',
-      h('a', { href: 'privacy.html' }, 'Privacy policy'),
-      state.sheet && state.sheet.id ? [' ', h('a', { href: 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(state.sheet.id) + '/edit', target: '_blank', rel: 'noopener noreferrer' }, 'Open the sheet')] : null);
-    return h('div', null, banner, top, h('main', null, content), foot);
+      'Changes to housing happen in the home-search sheet or its Forms. ',
+      h('a', { href: 'privacy.html' }, 'Privacy policy'));
+    var t = state.toast ? h('div', { class: 'toast' + (state.toast.bad ? ' bad' : ''), role: 'status' }, state.toast.text) : null;
+    return h('div', null, banner, top, h('main', null, content), foot, t);
   }
 
   function render() {
     readRoute();
+    var active = document.activeElement, keep = null;
     app.replaceChildren(
       state.needSignIn || !state.token && !state.data ? screenSignIn()
         : !state.sheet ? screenChoose()
