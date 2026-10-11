@@ -1,6 +1,6 @@
 # Runway
 
-Version 0.12.0. Shows Overview, Tasks, Decisions, Housing, Requirements, Chronology, Journal and Documents from two Google Sheets. People with edit access can check off tasks and add tasks, decisions and journal entries. People with edit access can also change a home's status and pick the reasons for a rejection.
+Version 0.13.0. Shows Overview, Tasks, Decisions, Housing, Requirements, Chronology, Journal and Documents from two Google Sheets. People with edit access can check off tasks and add tasks, decisions and journal entries. People with edit access can also change a home's status and pick the reasons for a rejection.
 
 ## Before you upload
 
@@ -53,6 +53,10 @@ Before using it on the real home-search sheet, make a copy of that sheet in Driv
 ## Requirements tab (optional)
 
 Add a tab named `Requirements` to the planning sheet with the headers `Section`, `Group`, `Requirement`, `Detail`, `Where it is tracked`, `Priority`. Priority is optional (for example Must or Nice). The Retirement Research workbook has a ready-made Requirements tab you can copy over.
+
+## Home Checks tab (optional)
+
+Add a tab named `Home Checks` to the home-search sheet with the headers `Home ID`, `Req ID`, `Requirement`, `Result`, `Note`, `Checked by`, `Checked on`. Runway saves each home's requirement checks there. The Requirements tab in the planning sheet needs the extra columns `Req ID`, `Tour field` and `Meets when` for the checklist to link requirements to Tour Notes answers.
 
 ## Versions
 
