@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.0
+- New: people with edit access can change a home's status from its card on the Housing page. Runway writes the new status to that home's row in the Home Listing tab, after confirming the row still belongs to that Home ID.
+- Changed: a home's card stays open and the page keeps its place after saving.
+- Only the six standard statuses can be chosen: Researching, To tour, Toured, Active, Rejected, Purchased.
+
 ## 0.7.0
 - New: each home also gets a "Log a contact here" button when the Links tab has a row named for the contact Form with its Prefill field filled in. Any Housing forms row with a Prefill field gets a per-home button.
 - Changed: the per-home buttons no longer require the row name to contain "tour".

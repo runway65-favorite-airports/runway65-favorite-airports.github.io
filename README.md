@@ -1,6 +1,6 @@
 # Runway
 
-Version 0.7.0. Shows Overview, Tasks, Decisions, Housing, Chronology, Journal and Documents from two Google Sheets. People with edit access can check off tasks and add tasks, decisions and journal entries. Housing stays read-only.
+Version 0.8.0. Shows Overview, Tasks, Decisions, Housing, Chronology, Journal and Documents from two Google Sheets. People with edit access can check off tasks and add tasks, decisions and journal entries. People with edit access can also change a home's status.
 
 ## Before you upload
 
@@ -46,13 +46,17 @@ Add a tab named `Links` to the planning sheet with the headers `Name`, `URL`, `G
 
 For the per-home shortcuts ("Log a tour here", "Log a contact here"), put the field code of the Tour Form's "Which home?" question (for example `entry.1234567890`) in the Prefill field column of each Housing forms row that should have a per-home button. The dropdown options in that Form must read exactly `HOME-### Builder: Model`, the same as Runway builds from the Home Listing tab.
 
+## Trying status changes safely
+
+Before using it on the real home-search sheet, make a copy of that sheet in Drive, choose the copy under Sheets, and change a status there. Change the Sheets choice back to the real sheet afterward.
+
 ## Versions
 
 Every upload gets a new version number. Update it in three places: `APP_VERSION` at the top of `app.js`, the `?v=` tags in `index.html`, and `CHANGELOG.md`.
 
 ## What it does not do yet
 
-- It cannot change housing data. Add and edit homes in the sheet or its Forms.
+- It can change a home's status only. Add homes and edit other fields in the sheet or its Forms.
 - Documents cannot be added from the app yet.
 
 ## Security notes
