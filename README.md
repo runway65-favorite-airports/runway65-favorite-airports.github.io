@@ -1,6 +1,6 @@
 # Runway
 
-Version 0.4.0. Shows Overview, Tasks, Decisions, Housing, Chronology, Journal and Documents from two Google Sheets. People with edit access can check off tasks and add tasks, decisions and journal entries. Housing stays read-only.
+Version 0.5.0. Shows Overview, Tasks, Decisions, Housing, Chronology, Journal and Documents from two Google Sheets. People with edit access can check off tasks and add tasks, decisions and journal entries. Housing stays read-only.
 
 ## Before you upload
 
@@ -39,6 +39,10 @@ Each tab needs a header row and a `Home ID` column. Runway reads columns by head
 ## The Runway planning sheet
 
 Tasks, Decisions and the Journal live in a second Google Sheet. The tab names and header names must stay exactly as they are. Create it from `Runway_Planning_Sheet_Template.xlsx`, share it as Restricted (owner, editors, viewers), then choose it in Runway under Sheets.
+
+## Form links (optional)
+
+Add a tab named `Links` to the planning sheet with the headers `Name`, `URL`, `Group`. Put each Google Form link in the URL column and set Group to `Housing forms`. Runway shows them as buttons on the Housing page for people with edit access. The links are never stored in this repository.
 
 ## Versions
 

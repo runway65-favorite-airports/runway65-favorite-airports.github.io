@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.0
+- New: the Housing page has an "Add or update" card for people with edit access, with buttons that open your Google Forms (add a listing, log a tour, log a contact) and the sheet itself.
+- The form links are read from an optional Links tab in the Runway planning sheet, not from this public site, so they stay private. Only Google Forms links are used.
+
 ## 0.4.0
 - New: Journal page. People with edit access can add dated entries, and everyone can read them. Entries also appear in the Chronology and as "Latest journal entry" on the Overview.
 - New: the Runway planning sheet needs a tab named Journal with the headers Entry ID, Date, Title, Detail, Logged by. Until it exists, the Journal page explains what to add and everything else keeps working.
