@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.0
+- New: choosing Rejected for a home on the Housing page opens a checklist of reasons, the same nine as the Rejected Reason question in the Home Listing Form. At least one is required. Runway writes the status and the reasons together, comma-separated, in one save.
+- New: changing a rejected home to another status clears its reason, and the card says so.
+- New: you can change a rejected home's reasons without changing its status.
+- Includes everything from 0.8.1 (security fixes, privacy page wording).
+
+## 0.8.1
+- Security: text typed in the app is saved to the sheets as plain text. A task title, note or journal entry that starts with =, +, - or @ could previously have been read by Google Sheets as a formula. The app now adds a leading apostrophe so it stays text.
+- Security: Runway refuses to run inside a frame on another website, which blocks clickjacking.
+- Fixed: the "You are here" marker now appears in the Chronology even after the target date has passed.
+- Privacy policy: states that the pages load fonts from Google Fonts, which means Google sees the visitor's IP address.
+
 ## 0.8.0
 - New: people with edit access can change a home's status from its card on the Housing page. Runway writes the new status to that home's row in the Home Listing tab, after confirming the row still belongs to that Home ID.
 - Changed: a home's card stays open and the page keeps its place after saving.
