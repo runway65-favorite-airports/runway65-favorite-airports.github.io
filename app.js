@@ -1,13 +1,13 @@
-/* Runway v0.7.0.
+/* Runway v0.8.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, Chronology, Journal and Documents.
-   - Editors (by Google's sharing settings) can check off tasks and add tasks, decisions and journal entries.
+   - Editors (by Google's sharing settings) can check off tasks, add tasks, decisions and journal entries, and change a home's status.
    Sheet text is always inserted as text (never as HTML). */
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.7.0';
+  var APP_VERSION = '0.8.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var HOME_KEY = 'runway.sheet'; // only a sheet's id and name are stored; neither is secret
@@ -21,7 +21,7 @@
     token: null, expires: 0, user: null, sheet: loadStore(HOME_KEY), plan: loadStore(PLAN_KEY),
     role: null, planRole: null, data: null, planData: null, planError: null,
     loadedAt: null, busy: false, error: null, saving: false, toast: null,
-    route: 'overview', filter: 'All', taskStream: 'All', showDone: false, needSignIn: true
+    route: 'overview', openHomes: {}, filter: 'All', taskStream: 'All', showDone: false, needSignIn: true
   };
 
   var app = document.getElementById('app');
@@ -204,7 +204,7 @@
     return t.listing.filter(function (r) { return r['Home ID']; }).map(function (r) {
       var id = r['Home ID'];
       return {
-        id: id, builder: r['Builder'] || '', model: r['Model'] || '', community: r['Community'] || '', city: r['City'] || '',
+        id: id, row: r._row, builder: r['Builder'] || '', model: r['Model'] || '', community: r['Community'] || '', city: r['City'] || '',
         status: canonStatus(r['Status']), price: num(r['List Price']), upgrade: num(r['Upgrade Price']), sqft: num(r['Sq Ft']),
         visit: r['Visit Date'] || '', reason: r['Rejected Reason'] || '', url: r['Listing URL'] || '', address: r['Address'] || '',
         notes: r['Notes'] || '', contact: r['Contact'] || '', phone: r['Tel. #'] || '',
@@ -269,7 +269,7 @@
         .catch(function () { by.docs = null; })
         .then(function () { return by; });
     }).then(function (by) {
-      state.data = { homes: buildHomes(by), tours: by.tours || [], contacts: by.contacts || [], docs: by.docs };
+      state.data = { homes: buildHomes(by), tours: by.tours || [], contacts: by.contacts || [], docs: by.docs, listingHead: (by.listing && by.listing.head) || [] };
     });
   }
 
@@ -369,6 +369,19 @@
     var obj = { 'Decision ID': nextId(P.decisions, 'D'), 'Decision': f.title, 'Workstream': f.stream, 'Options': f.options, 'Owners': f.owners, 'CFP input needed': f.cfp, 'Status': 'Open', 'Logged by': who() };
     return appendRow('Decisions', rowFrom(P.heads.decisions, obj)).then(loadPlan);
   }
+  function canEditHome() { return state.role === 'editor'; }
+  function homeBase() { return 'https://sheets.googleapis.com/v4/spreadsheets/' + enc(state.sheet.id); }
+  function setHomeStatus(x, status) {
+    var head = state.data.listingHead, iS = head.indexOf('Status'), iId = head.indexOf('Home ID');
+    if (iS < 0 || iId < 0) return Promise.reject(new Error('The Home Listing tab needs Status and Home ID columns.'));
+    if (STATUS_ORDER.indexOf(status) < 0) return Promise.reject(new Error('Choose one of the standard statuses.'));
+    return api(homeBase() + '/values/' + enc("'Home Listing'!" + colLetter(iId) + x.row)).then(function (j) {
+      var v = j.values && j.values[0] ? String(j.values[0][0]).trim() : '';
+      if (v !== x.id) throw new Error('The sheet changed since it was loaded. Runway refreshed it. Please try again.');
+      return api(homeBase() + '/values:batchUpdate', { method: 'POST', body: { valueInputOption: 'USER_ENTERED',
+        data: [{ range: "'Home Listing'!" + colLetter(iS) + x.row, values: [[status]] }] } });
+    }).then(function () { x.status = status; });
+  }
   function addJournal(f) {
     var P = state.planData;
     var obj = { 'Entry ID': nextId(P.journal, 'J'), 'Date': isoToUs(f.date) || todayText(), 'Title': f.title, 'Detail': f.detail, 'Logged by': who() };
@@ -392,7 +405,7 @@
       .catch(function (e) {
         state.saving = false;
         var msg = e && e.message ? e.message : 'Could not save.';
-        if (/changed since/.test(msg)) loadPlan().then(function () { toast(msg, true); }); else toast(msg, true);
+        if (/changed since/.test(msg)) loadAll().then(function () { toast(msg, true); }); else toast(msg, true);
       });
   }
 
@@ -669,10 +682,21 @@
       return h('a', { class: 'btn small', href: u.href, target: '_blank', rel: 'noopener noreferrer' }, label);
     });
   }
+  function statusEditor(x) {
+    if (!canEditHome()) return null;
+    var options = STATUS_ORDER.slice();
+    if (options.indexOf(x.status) < 0) options.unshift(x.status);
+    var sel = h('select', { 'aria-label': 'Status for ' + homeName(x) }, options.map(function (o) { return h('option', { value: o, selected: o === x.status ? true : null }, o); }));
+    return h('div', { class: 'stack', style: 'gap:8px' }, field('Change status', sel),
+      h('button', { class: 'btn small', type: 'button', style: 'align-self:flex-start', disabled: state.saving ? true : null, onclick: function () {
+        if (sel.value === x.status) { toast('That is already the status.', true); return; }
+        save(setHomeStatus(x, sel.value), 'Status updated to ' + sel.value);
+      } }, 'Save status'));
+  }
   function homeCard(x) {
     var t = x.tour || {};
     var priceText = money(x.price) + (x.upgrade && x.upgrade !== x.price ? ' (' + money(x.upgrade) + ' with upgrades)' : '');
-    return h('details', { class: 'home' },
+    return h('details', { class: 'home', open: state.openHomes[x.id] ? true : null, ontoggle: function (e) { state.openHomes[x.id] = e.target.open; } },
       h('summary', null,
         h('div', { class: 'head' }, h('h3', null, homeName(x)), h('strong', null, money(x.price))),
         h('div', { class: 'muted small' }, [x.community, x.city].filter(Boolean).join(', ')),
@@ -693,6 +717,7 @@
             h('div', { class: 'muted small' }, [c['Contact Name'], c['Channel'], c['Direction']].filter(Boolean).join(', ')),
             c['Summary'] ? h('div', { class: 'small' }, c['Summary']) : null);
         }))) : null,
+        statusEditor(x),
         h('div', { class: 'chips' }, homeLinks(x), x.url ? h('a', { class: 'btn ghost small', href: x.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open listing') : null)
       )
     );
@@ -936,13 +961,14 @@
 
   function render() {
     readRoute();
-    var active = document.activeElement, keep = null;
+    var y = window.scrollY || 0;
     app.replaceChildren(
       state.needSignIn || !state.token && !state.data ? screenSignIn()
         : !state.sheet ? screenChoose()
         : state.busy && !state.data ? screenLoading()
         : screenApp()
     );
+    try { if (y) window.scrollTo(0, y); } catch (e) { /* ignore */ }
     document.title = (state.needSignIn ? 'Runway' : ROUTES[state.route][0] + ' | Runway');
   }
 
