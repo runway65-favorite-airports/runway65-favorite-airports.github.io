@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0
+- New: Journal page. People with edit access can add dated entries, and everyone can read them. Entries also appear in the Chronology and as "Latest journal entry" on the Overview.
+- New: the Runway planning sheet needs a tab named Journal with the headers Entry ID, Date, Title, Detail, Logged by. Until it exists, the Journal page explains what to add and everything else keeps working.
+- Changed: "Homes to tour" is now its own card on the Overview.
+
 ## 0.3.0
 - New: Tasks and Decisions pages, read from a separate Runway planning sheet.
 - New: people with edit access can check off tasks, add tasks, add decisions, and record decisions. People with view access can read everything and change nothing.

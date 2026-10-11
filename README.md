@@ -1,6 +1,6 @@
 # Runway
 
-Version 0.3.0. Shows Overview, Tasks, Decisions, Housing, Chronology and Documents from two Google Sheets. People with edit access can check off tasks and add tasks and decisions. Housing stays read-only.
+Version 0.4.0. Shows Overview, Tasks, Decisions, Housing, Chronology, Journal and Documents from two Google Sheets. People with edit access can check off tasks and add tasks, decisions and journal entries. Housing stays read-only.
 
 ## Before you upload
 
@@ -38,7 +38,7 @@ Each tab needs a header row and a `Home ID` column. Runway reads columns by head
 
 ## The Runway planning sheet
 
-Tasks and Decisions live in a second Google Sheet. Create it from `Runway_Planning_Sheet_Template.xlsx`, share it as Restricted (owner, editors, viewers), then choose it in Runway under Sheets.
+Tasks, Decisions and the Journal live in a second Google Sheet. The tab names and header names must stay exactly as they are. Create it from `Runway_Planning_Sheet_Template.xlsx`, share it as Restricted (owner, editors, viewers), then choose it in Runway under Sheets.
 
 ## Versions
 
@@ -47,7 +47,7 @@ Every upload gets a new version number. Update it in three places: `APP_VERSION`
 ## What it does not do yet
 
 - It cannot change housing data. Add and edit homes in the sheet or its Forms.
-- Journal entries and documents cannot be added from the app yet.
+- Documents cannot be added from the app yet.
 
 ## Security notes
 
