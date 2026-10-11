@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.0
+- New: people with edit access can add a document link from the Documents page. Runway appends a row to the Documents & Links tab with title, link, workstream, optional home, owner, sensitivity and review date, and fills in "Added by", "Added on" and the Drive file ID (when the link is a Drive or Docs link).
+- Safeguards: the link must start with https://, a link already in the list is refused, and typed text is saved as plain text.
+- Runway only adds the link. It does not change who can open the file in Drive.
+
 ## 0.9.0
 - New: choosing Rejected for a home on the Housing page opens a checklist of reasons, the same nine as the Rejected Reason question in the Home Listing Form. At least one is required. Runway writes the status and the reasons together, comma-separated, in one save.
 - New: changing a rejected home to another status clears its reason, and the card says so.
