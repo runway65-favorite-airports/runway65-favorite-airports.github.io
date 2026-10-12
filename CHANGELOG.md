@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15.0
+- New: each home's card has a "Log a contact" form for people with edit access. It records who you spoke with (filled from the home's contact), the date, how (in person, email, phone, text, online form), direction (inbound, outbound, meeting), subject, summary, an optional https link, and whether action is required, with the next action and due date. Runway writes the same row your Contact Form writes, with "Which Home?" set from the home, so the Home ID fills in by itself.
+- Runway writes only the Contact Form's own columns. The blank gap column and the Home ID formula column are left alone.
+- New contacts appear on the home's card and, when action is required, under Open follow-ups on the Overview.
+- Fixed: the notice shown after adding a home now sits in a fixed bar at the bottom of the screen, so it is visible wherever you are on the page.
+
 ## 0.14.0
 - New: editors can add a home from the Housing page. Runway gives it the next Home ID, adds it to the Home Listing tab with status Researching (or the status you choose), and records who added it. It fills Style and Garage with the most common values already in the sheet. Duplicate homes (same builder, model and community, or the same listing link) are refused.
 - New: after adding a home, a notice reminds you to add the new "HOME-### Builder: Model" option to the "Which home?" dropdown in the Tour and Contact Forms, which the pre-filled buttons need.

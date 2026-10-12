@@ -1,13 +1,13 @@
-/* Runway v0.14.0.
+/* Runway v0.15.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, Requirements, Chronology, Journal and Documents.
-   - Editors (by Google's sharing settings) can check off tasks, add tasks, decisions and journal entries, and change a home's status pick why a home was rejected, keep the tour Decision in step with the status, add document links, check each home against the requirements, and add a home.
+   - Editors (by Google's sharing settings) can check off tasks, add tasks, decisions and journal entries, and change a home's status pick why a home was rejected, keep the tour Decision in step with the status, add document links, check each home against the requirements, add a home, and log a builder contact.
    Sheet text is always inserted as text (never as HTML). */
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.14.0';
+  var APP_VERSION = '0.15.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var HOME_KEY = 'runway.sheet'; // only a sheet's id and name are stored; neither is secret
@@ -320,7 +320,7 @@
         })
         .then(function () { return by; });
     }).then(function (by) {
-      state.data = { homes: buildHomes(by), tours: by.tours || [], contacts: by.contacts || [], docs: by.docs, listingHead: (by.listing && by.listing.head) || [], docsHead: (by.docs && by.docs.head) || [], listingRows: by.listing || [], tourHead: (by.tours && by.tours.head) || [], checks: buildChecks(by.checks) };
+      state.data = { homes: buildHomes(by), tours: by.tours || [], contacts: by.contacts || [], docs: by.docs, listingHead: (by.listing && by.listing.head) || [], docsHead: (by.docs && by.docs.head) || [], listingRows: by.listing || [], tourHead: (by.tours && by.tours.head) || [], checks: buildChecks(by.checks), contactsHead: (by.contacts && by.contacts.head) || [] };
     });
   }
 
@@ -402,6 +402,11 @@
   function cell(tab, head, name, row, value) {
     var i = head.indexOf(name);
     return i < 0 ? null : { range: "'" + tab + "'!" + colLetter(i) + row, values: [[safeText(value)]] };
+  }
+  function rowLoose(head, obj) {
+    var cut = head.indexOf(''); var cols = cut >= 0 ? head.slice(0, cut) : head;
+    var map = {}; Object.keys(obj).forEach(function (k) { map[normKey(k)] = obj[k]; });
+    return cols.map(function (k) { var v = map[normKey(k)]; return v === undefined ? '' : safeText(v); });
   }
   function rowFrom(head, obj) { return head.map(function (k) { return obj[k] === undefined ? '' : safeText(obj[k]); }); }
   function nextId(items, prefix) {
@@ -516,6 +521,15 @@
         state.notice = 'Added ' + id + '. To log tours or contacts for it with the Forms, add "' + id + ' ' + (f.builder + ': ' + f.model) + '" to the "Which home?" dropdown in the Tour and Contact Forms. The Log a tour and Log a contact buttons need that option too.';
       });
   }
+  function addContact(x, f) {
+    var head = state.data.contactsHead;
+    if (!head.length) return Promise.reject(new Error('The Contacts Log tab was not found.'));
+    var obj = { 'Timestamp': stamp(), 'Contact Name': f.name, 'Builder': x.builder, 'Community': x.community, 'Date': isoToUs(f.date) || todayText(),
+      'Channel': f.channel, 'Direction': f.direction, 'Subject': f.subject, 'Summary': f.summary, 'Documents / Links Reference': f.link,
+      'Action Required': f.action, 'Action Notes': f.actionNotes, 'Which Home?': homeFormLabel(x), 'Logged by': who(), 'Next action': f.next, 'Due date': isoToUs(f.due) };
+    return api(homeBase() + '/values/' + enc("'Contacts Log'!A1") + ':append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS',
+      { method: 'POST', body: { values: [rowLoose(head, obj)] } }).then(loadHome);
+  }
   function driveIdFrom(url) {
     var m = String(url).match(/\/d\/([A-Za-z0-9_-]{15,})/) || String(url).match(/[?&]id=([A-Za-z0-9_-]{15,})/);
     return m ? m[1] : '';
@@ -557,9 +571,9 @@
   function clearDraft(form) {
     Object.keys(state.drafts).forEach(function (k) { if (k.indexOf(form + '.') === 0) delete state.drafts[k]; });
   }
-  function formAttrs(form, openByDefault) {
+  function formAttrs(form, openByDefault, cls) {
     var open = state.openForms[form] === undefined ? !!openByDefault : state.openForms[form];
-    return { class: 'card addform', open: open ? true : null, ontoggle: function (e) { state.openForms[form] = e.target.open; } };
+    return { class: cls || 'card addform', open: open ? true : null, ontoggle: function (e) { state.openForms[form] = e.target.open; } };
   }
   function submit(form, p) {
     return p.then(function (ok) { if (ok) { clearDraft(form); render(); } });
@@ -878,6 +892,33 @@
             contact: contact.value.trim(), phone: phone.value.trim(), notes: notes.value.trim(), status: status.value }), 'Home added'));
         } }, 'Add home')));
   }
+  var CHANNELS = ['In Person', 'Email', 'Phone', 'Text', 'Online form'];
+  var DIRECTIONS = ['Inbound', 'Outbound', 'Meeting'];
+  function contactForm(x) {
+    if (!canEditHome() || !state.data.contactsHead.length) return null;
+    var k = 'contact-' + x.id;
+    function t(name, max, ph) { return keep(k, name, h('input', { type: 'text', maxlength: String(max), placeholder: ph || '' })); }
+    function sel(name, list) { return keep(k, name, h('select', null, list.map(function (o) { return h('option', { value: o }, o); }))); }
+    var name = t('name', 60), subject = t('subject', 200, 'What this was about'), next = t('next', 200, 'Only if action is required');
+    if (state.drafts[k + '.name'] === undefined && x.contact) name.value = x.contact;
+    var date = h('input', { type: 'date' });
+    var d0 = new Date(); date.value = d0.getFullYear() + '-' + pad(d0.getMonth() + 1, 2) + '-' + pad(d0.getDate(), 2); keep(k, 'date', date);
+    var channel = sel('channel', CHANNELS), direction = sel('direction', DIRECTIONS), action = sel('action', ['No', 'Yes']);
+    var summary = keep(k, 'summary', h('textarea', { rows: '3', maxlength: '2000' }));
+    var link = keep(k, 'link', h('input', { type: 'url', maxlength: '800', placeholder: 'https:// (optional)', inputmode: 'url' }));
+    var due = keep(k, 'due', h('input', { type: 'date' }));
+    return h('details', formAttrs(k, false, 'subform'), h('summary', null, 'Log a contact'),
+      h('div', { class: 'stack', style: 'margin-top:12px' },
+        field('Who you spoke with', name), field('Date', date), field('How', channel), field('Direction', direction), field('Subject', subject), field('Summary (optional)', summary),
+        field('Link (optional)', link), field('Action required', action), field('Next action', next), field('Due date (optional)', due),
+        h('button', { class: 'btn small', type: 'button', style: 'align-self:flex-start', disabled: state.saving ? true : null, onclick: function () {
+          if (!subject.value.trim()) { toast('Add a subject.', true); return; }
+          if (link.value.trim() && !/^https:\/\//i.test(link.value.trim())) { toast('The link must start with https://', true); return; }
+          if (action.value === 'Yes' && !next.value.trim()) { toast('Describe the next action.', true); return; }
+          submit(k, save(addContact(x, { name: name.value.trim(), date: date.value, channel: channel.value, direction: direction.value, subject: subject.value.trim(),
+            summary: summary.value.trim(), link: link.value.trim(), action: action.value, actionNotes: '', next: next.value.trim(), due: due.value }), 'Contact logged'));
+        } }, 'Save contact')));
+  }
   function reqSummary(x) {
     var P = state.planData; if (!P || !P.requirements.length) return null;
     var yes = 0, no = 0, unk = 0, mustFail = false;
@@ -971,6 +1012,7 @@
             c['Summary'] ? h('div', { class: 'small' }, c['Summary']) : null);
         }))) : null,
         reqChecklist(x),
+        contactForm(x),
         statusEditor(x),
         h('div', { class: 'chips' }, homeLinks(x), x.url ? h('a', { class: 'btn ghost small', href: x.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open listing') : null)
       )
