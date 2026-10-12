@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.16.1
+- Fixed: choosing the wrong file as the home-search sheet or the planning sheet (a file without the tabs Runway needs) left the person stuck, with no way to choose again. The error now says "That does not look like the right sheet" and offers a Choose sheet button (Choose planning sheet for the planning sheet).
+- Fixed: the Sheets page now opens even when a sheet failed to load, and shows the name of the file that was chosen, so a wrong choice can always be changed.
+
 ## 0.16.0
 - New: Compare homes page. Pick up to six homes (Active homes are chosen to start) and see them side by side: status, community, list price, price with upgrades, price per square foot, size, bedrooms and baths, garage, HOA, when toured, the tour decision, latest contact, open follow-up, pros, cons and the listing link.
 - New: when the planning sheet's Requirements tab is connected, the comparison includes a Requirements section with each home's met, not met and unknown counts and a Yes, No or ? for every requirement. A switch shows only the requirements where the chosen homes differ.

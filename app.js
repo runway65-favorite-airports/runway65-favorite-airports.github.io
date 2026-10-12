@@ -1,4 +1,4 @@
-/* Runway v0.16.0.
+/* Runway v0.16.1.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.16.0';
+  var APP_VERSION = '0.16.1';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var HOME_KEY = 'runway.sheet'; // only a sheet's id and name are stored; neither is secret
@@ -181,7 +181,7 @@
     if (e.status === 401) return { title: 'Your sign-in expired', body: 'Sign in again to continue.', action: 'signin' };
     if (e.status === 404 || /not found/i.test(m)) return { title: 'Runway cannot open that sheet', body: 'Choose the sheet again. Runway can only open a file you pick with the Choose sheet button.', action: 'pick' };
     if (e.status === 403) return { title: 'Google refused access', body: m || 'This account may not have access to the sheet.', action: 'pick' };
-    if (/Unable to parse range/i.test(m)) return { title: 'A tab is missing', body: m };
+    if (/Unable to parse range/i.test(m)) return { title: 'That does not look like the right sheet', body: 'The sheet you chose is missing a tab Runway needs (' + m + '). Choose the sheet again.', action: 'pick' };
     return { title: 'Something went wrong', body: m || 'Try again.' };
   }
 
@@ -634,7 +634,9 @@
   function pageHead(title, lede) { return h('div', null, h('h1', null, title), lede ? h('p', { class: 'lede' }, lede) : null); }
   function planProblem() {
     if (!state.plan) return null;
-    return state.planError ? h('div', { class: 'alert', role: 'alert' }, h('strong', null, state.planError.title), h('span', null, state.planError.body)) : null;
+    var e = state.planError; if (!e) return null;
+    return h('div', { class: 'alert', role: 'alert' }, h('strong', null, e.title), h('span', null, e.body),
+      e.action === 'pick' ? h('div', { style: 'margin-top:10px' }, h('button', { class: 'btn small', type: 'button', onclick: doPickPlan }, 'Choose planning sheet')) : null);
   }
   function bar(done, total) {
     var wrap = h('div', { class: 'meter', role: 'img', 'aria-label': done + ' of ' + total + ' done' }, h('i', null));
@@ -1420,7 +1422,7 @@
         h('button', { class: 'btn ghost small', type: 'button', onclick: loadAll }, 'Refresh'),
         h('button', { class: 'btn ghost small', type: 'button', onclick: function () { go('sheets'); } }, 'Sheets'),
         h('button', { class: 'btn ghost small', type: 'button', onclick: doSignOut }, 'Sign out'))));
-    var content = state.error ? errorBox() : (state.data ? ROUTES[state.route][1]() : null);
+    var content = state.route === 'sheets' ? viewSheets() : state.error ? errorBox() : (state.data ? ROUTES[state.route][1]() : null);
     var foot = h('div', { class: 'foot' },
       'Runway v' + APP_VERSION + '. ',
       state.loadedAt ? 'Loaded ' + state.loadedAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) + '. ' : '',
