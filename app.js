@@ -1,13 +1,13 @@
-/* Runway v0.15.0.
+/* Runway v0.16.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
-   - Shows Overview, Tasks, Decisions, Housing, Requirements, Chronology, Journal and Documents.
+   - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
    - Editors (by Google's sharing settings) can check off tasks, add tasks, decisions and journal entries, and change a home's status pick why a home was rejected, keep the tour Decision in step with the status, add document links, check each home against the requirements, add a home, and log a builder contact.
    Sheet text is always inserted as text (never as HTML). */
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.15.0';
+  var APP_VERSION = '0.16.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var HOME_KEY = 'runway.sheet'; // only a sheet's id and name are stored; neither is secret
@@ -23,7 +23,7 @@
     token: null, expires: 0, user: null, sheet: loadStore(HOME_KEY), plan: loadStore(PLAN_KEY),
     role: null, planRole: null, data: null, planData: null, planError: null,
     loadedAt: null, busy: false, error: null, saving: false, notice: null, drafts: {}, openForms: {},
-    route: 'overview', openHomes: {}, openReq: {}, filter: 'All', taskStream: 'All', showDone: false, needSignIn: true
+    route: 'overview', openHomes: {}, openReq: {}, compareIds: null, compareDiff: false, filter: 'All', taskStream: 'All', showDone: false, needSignIn: true
   };
 
   var app = document.getElementById('app');
@@ -250,7 +250,7 @@
     return t.listing.filter(function (r) { return r['Home ID']; }).map(function (r) {
       var id = r['Home ID'];
       return {
-        id: id, row: r._row, builder: r['Builder'] || '', model: r['Model'] || '', community: r['Community'] || '', city: r['City'] || '',
+        id: id, row: r._row, beds: r['Bedrooms'] || '', baths: r['Baths'] || '', garage: r['Garage'] || '', builder: r['Builder'] || '', model: r['Model'] || '', community: r['Community'] || '', city: r['City'] || '',
         status: canonStatus(r['Status']), price: num(r['List Price']), upgrade: num(r['Upgrade Price']), sqft: num(r['Sq Ft']),
         visit: r['Visit Date'] || '', reason: r['Rejected Reason'] || '', url: r['Listing URL'] || '', address: r['Address'] || '',
         notes: r['Notes'] || '', contact: r['Contact'] || '', phone: r['Tel. #'] || '',
@@ -715,7 +715,8 @@
               h('div', { style: 'display:flex;justify-content:space-between;gap:12px' }, h('strong', null, homeName(x)), h('span', null, money(x.price))),
               h('div', { class: 'muted small' }, [x.community, x.city].filter(Boolean).join(', ')),
               h('div', { class: 'small' }, x.visit ? 'Toured ' + x.visit : 'Not toured yet'));
-          })) : h('p', { class: 'muted' }, 'No homes marked Active.')),
+          })) : h('p', { class: 'muted' }, 'No homes marked Active.'),
+          active.length > 1 ? h('a', { class: 'btn ghost small', href: '#/compare', style: 'align-self:flex-start' }, 'Compare these homes') : null),
         h('section', { class: 'card col stack' },
           h('h2', null, 'Homes to tour'),
           toTour.length ? h('ul', { class: 'list' }, toTour.map(function (x) {
@@ -1043,6 +1044,7 @@
     }
     return h('div', { class: 'stack' },
       h('div', null, h('h1', null, 'Housing'), h('p', { class: 'lede' }, 'Every home in your listing sheet, joined with tour notes and builder contacts by Home ID.')),
+      h('div', { class: 'chips' }, h('a', { class: 'btn small', href: '#/compare' }, 'Compare homes side by side')),
       quick, canEditHome() ? addHomeForm() : null,
       h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by status' }, statuses.map(function (s) {
         return h('button', { class: 'chip', type: 'button', 'aria-pressed': String(state.filter === s), onclick: function () { state.filter = s; render(); } }, s);
@@ -1116,6 +1118,82 @@
         h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by where it is tracked' }, chipEls), search,
         h('p', { class: 'muted small' }, 'Tour Notes and Home Listings: Runway or your Forms already capture it. Pre-qualify: confirm before adding a home to the pipeline. Not captured: check it yourself on each visit.')),
       cards, empty);
+  }
+
+  /* ----- Compare ----- */
+  function viewCompare() {
+    var d = state.data, homes = d.homes.slice();
+    var head = pageHead('Compare homes', 'Pick up to six homes and see them side by side. Active homes are chosen to start.');
+    if (!homes.length) return h('div', { class: 'stack' }, head, h('p', { class: 'muted' }, 'No homes yet.'));
+    var ids = state.compareIds;
+    if (!ids) { ids = homes.filter(function (x) { return x.status === 'Active'; }).map(function (x) { return x.id; }).slice(0, 6); state.compareIds = ids; }
+    ids = ids.filter(function (id) { return homes.some(function (x) { return x.id === id; }); });
+    var picked = ids.map(function (id) { return homes.filter(function (x) { return x.id === id; })[0]; });
+    var chips = homes.map(function (x) {
+      var on = ids.indexOf(x.id) >= 0;
+      return h('button', { class: 'chip', type: 'button', 'aria-pressed': String(on), onclick: function () {
+        var cur = (state.compareIds || []).slice(), i = cur.indexOf(x.id);
+        if (i >= 0) cur.splice(i, 1); else { if (cur.length >= 6) { toast('Compare up to six homes at a time.', true); return; } cur.push(x.id); }
+        state.compareIds = cur; render();
+      } }, homeName(x));
+    });
+    var controls = h('section', { class: 'card stack' }, h('div', { class: 'chips', role: 'group', 'aria-label': 'Homes to compare' }, chips),
+      h('div', { class: 'chips' }, h('button', { class: 'chip', type: 'button', 'aria-pressed': String(state.compareDiff), onclick: function () { state.compareDiff = !state.compareDiff; render(); } }, 'Show only requirement differences'),
+        h('button', { class: 'chip', type: 'button', onclick: function () { state.compareIds = homes.filter(function (x) { return x.status === 'Active'; }).map(function (x) { return x.id; }).slice(0, 6); render(); } }, 'Reset to Active homes')));
+    if (!picked.length) return h('div', { class: 'stack' }, head, controls, h('p', { class: 'muted' }, 'Choose at least one home above.'));
+
+    var P = state.planData && state.planData.requirements && state.planData.requirements.length ? state.planData : null;
+    var rows = [];
+    function section(label) { rows.push(h('tr', { class: 'section' }, h('th', { colspan: String(picked.length + 1), scope: 'colgroup' }, label))); }
+    function line(label, cells) { rows.push(h('tr', null, h('th', { scope: 'row' }, label), cells.map(function (c) { return h('td', null, c); }))); }
+    function perSqft(x) { return x.price && x.sqft ? '$' + Math.round(x.price / x.sqft) + ' per sq ft' : ''; }
+    function latestContact(x) {
+      var best = null;
+      x.contacts.forEach(function (c) { var dt = parseDate(c['Date']); if (!best || (dt && (!best.dt || dt > best.dt))) best = { c: c, dt: dt }; });
+      return best ? (best.c['Date'] ? best.c['Date'] + ': ' : '') + (best.c['Subject'] || 'Contact') : '';
+    }
+    function followUp(x) {
+      var f = x.contacts.filter(function (c) { return /^y/i.test(col(c, /^action required/i)); })[0];
+      return f ? (col(f, /^next action/i) || f['Subject'] || 'Follow up') + (col(f, /^due date/i) ? ' (due ' + col(f, /^due date/i) + ')' : '') : '';
+    }
+    section('The basics');
+    line('Status', picked.map(function (x) { return tagFor(x.status); }));
+    line('Community', picked.map(function (x) { return [x.community, x.city].filter(Boolean).join(', '); }));
+    line('List price', picked.map(function (x) { return x.price !== null ? money(x.price) : ''; }));
+    line('With upgrades', picked.map(function (x) { return x.upgrade !== null && x.upgrade !== x.price ? money(x.upgrade) : ''; }));
+    line('Price per sq ft', picked.map(perSqft));
+    line('Square feet', picked.map(function (x) { return x.sqft ? String(x.sqft) : ''; }));
+    line('Beds and baths', picked.map(function (x) { return [x.beds ? x.beds + ' bed' : '', x.baths ? x.baths + ' bath' : ''].filter(Boolean).join(', '); }));
+    line('Garage', picked.map(function (x) { return x.garage; }));
+    line('HOA monthly', picked.map(function (x) { var v = x.tour ? tourValue(x.tour, 'HOA Monthly') : ''; return v ? (/^\d/.test(v) ? '$' + v : v) : ''; }));
+    section('Where you stand');
+    line('Toured', picked.map(function (x) { return x.visit || (x.tour && x.tour['Visit Date']) || 'Not yet'; }));
+    line('Tour decision', picked.map(function (x) { return x.tour ? x.tour['Decision'] || '' : ''; }));
+    line('Latest contact', picked.map(latestContact));
+    line('Open follow-up', picked.map(followUp));
+    line('Pros', picked.map(function (x) { return x.tour ? x.tour['Pros'] || '' : ''; }));
+    line('Cons', picked.map(function (x) { return x.tour ? x.tour['Cons'] || '' : ''; }));
+    line('Listing', picked.map(function (x) { return x.url ? h('a', { href: x.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open listing') : ''; }));
+    if (P) {
+      section('Requirements');
+      line('Summary', picked.map(function (x) {
+        var m = reqSummary(x);
+        return h('span', { class: 'tag' + (m.mustFail ? ' warn' : '') }, m.yes + ' met, ' + m.no + ' not met, ' + m.unk + ' unknown');
+      }));
+      var shown = 0;
+      P.requirements.forEach(function (q) {
+        var st = picked.map(function (x) { return reqStatus(x, q); });
+        var same = st.every(function (r) { return r.result === st[0].result; });
+        if (state.compareDiff && same) return;
+        shown++;
+        line(q.text, st.map(function (r) { return h('span', { class: 'tag' + (r.result === 'No' ? ' warn' : r.result === 'Yes' ? ' active' : '') }, r.result === 'Unknown' ? '?' : r.result); }));
+      });
+      if (!shown) rows.push(h('tr', null, h('td', { colspan: String(picked.length + 1) }, 'The selected homes have the same answer on every requirement.')));
+    }
+    var grid = h('table', { class: 'cmp' },
+      h('thead', null, h('tr', null, h('th', { scope: 'col' }, ''), picked.map(function (x) { return h('th', { scope: 'col' }, h('div', null, homeName(x)), h('div', { class: 'muted small' }, x.id)); }))),
+      h('tbody', null, rows));
+    return h('div', { class: 'stack' }, head, controls, h('section', { class: 'card scroll' }, grid));
   }
 
   /* ----- Journal ----- */
@@ -1265,7 +1343,7 @@
   /* ---------- shell ---------- */
   var ROUTES = {
     overview: ['Overview', viewOverview], tasks: ['Tasks', viewTasks], decisions: ['Decisions', viewDecisions],
-    housing: ['Housing', viewHousing], requirements: ['Requirements', viewRequirements], chronology: ['Chronology', viewChronology], journal: ['Journal', viewJournal], documents: ['Documents', viewDocuments], sheets: ['Sheets', viewSheets]
+    housing: ['Housing', viewHousing], compare: ['Compare homes', viewCompare], requirements: ['Requirements', viewRequirements], chronology: ['Chronology', viewChronology], journal: ['Journal', viewJournal], documents: ['Documents', viewDocuments], sheets: ['Sheets', viewSheets]
   };
   var NAV = ['overview', 'tasks', 'decisions', 'housing', 'requirements', 'chronology', 'journal', 'documents'];
 

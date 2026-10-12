@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.16.0
+- New: Compare homes page. Pick up to six homes (Active homes are chosen to start) and see them side by side: status, community, list price, price with upgrades, price per square foot, size, bedrooms and baths, garage, HOA, when toured, the tour decision, latest contact, open follow-up, pros, cons and the listing link.
+- New: when the planning sheet's Requirements tab is connected, the comparison includes a Requirements section with each home's met, not met and unknown counts and a Yes, No or ? for every requirement. A switch shows only the requirements where the chosen homes differ.
+- Read-only for everyone. Reached from a "Compare homes side by side" button on the Housing page and a "Compare these homes" button on the Overview.
+- On narrow screens the table scrolls sideways and its row labels stay in place.
+
 ## 0.15.0
 - New: each home's card has a "Log a contact" form for people with edit access. It records who you spoke with (filled from the home's contact), the date, how (in person, email, phone, text, online form), direction (inbound, outbound, meeting), subject, summary, an optional https link, and whether action is required, with the next action and due date. Runway writes the same row your Contact Form writes, with "Which Home?" set from the home, so the Home ID fills in by itself.
 - Runway writes only the Contact Form's own columns. The blank gap column and the Home ID formula column are left alone.
