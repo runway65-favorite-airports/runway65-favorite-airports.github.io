@@ -171,3 +171,11 @@ details>summary{cursor:pointer;font-weight:600;color:var(--teal);min-height:44px
 /* v0.15.0: contact sub-form */
 .subform{border:1px solid var(--line);border-radius:12px;padding:0 14px 12px}
 .subform>summary{font-size:16px}
+
+/* v0.16.0: compare view */
+.cmp{border-collapse:separate;border-spacing:0;min-width:640px;width:100%;font-size:15px}
+.cmp th,.cmp td{padding:10px 12px;border-top:1px solid var(--line-2);vertical-align:top;text-align:left;background:var(--card);overflow-wrap:anywhere}
+.cmp thead th{font-family:var(--display);font-size:16px;color:var(--ink);border-top:0}
+.cmp tbody th[scope=row]{position:sticky;left:0;z-index:1;min-width:150px;max-width:220px;font-weight:600;border-right:1px solid var(--line-2)}
+.cmp thead th:first-child{position:sticky;left:0;z-index:2}
+.cmp tr.section th{background:var(--teal-soft);color:var(--teal);font-weight:700;position:static;border-right:0}
