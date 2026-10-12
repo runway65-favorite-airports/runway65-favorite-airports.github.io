@@ -1,6 +1,6 @@
 # Runway
 
-Version 0.13.0. Shows Overview, Tasks, Decisions, Housing, Requirements, Chronology, Journal and Documents from two Google Sheets. People with edit access can check off tasks and add tasks, decisions and journal entries. People with edit access can also change a home's status and pick the reasons for a rejection.
+Version 0.14.0. Shows Overview, Tasks, Decisions, Housing, Requirements, Chronology, Journal and Documents from two Google Sheets. People with edit access can check off tasks and add tasks, decisions and journal entries. People with edit access can also change a home's status and pick the reasons for a rejection.
 
 ## Before you upload
 
@@ -64,7 +64,7 @@ Every upload gets a new version number. Update it in three places: `APP_VERSION`
 
 ## What it does not do yet
 
-- It can change a home's status, rejection reasons and the matching Tour Notes Decision. Add homes and edit other fields in the sheet or its Forms.
+- It can add a home, change a home's status and rejection reasons, and update the matching Tour Notes Decision. Edit other home fields in the sheet or its Forms. If the Home ID column is protected to one person, only that person can add homes.
 - It does not upload files or change Drive sharing. Documents are added as links.
 
 ## Security notes

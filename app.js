@@ -1,13 +1,13 @@
-/* Runway v0.13.0.
+/* Runway v0.14.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, Requirements, Chronology, Journal and Documents.
-   - Editors (by Google's sharing settings) can check off tasks, add tasks, decisions and journal entries, and change a home's status pick why a home was rejected, keep the tour Decision in step with the status, add document links, and check each home against the requirements.
+   - Editors (by Google's sharing settings) can check off tasks, add tasks, decisions and journal entries, and change a home's status pick why a home was rejected, keep the tour Decision in step with the status, add document links, check each home against the requirements, and add a home.
    Sheet text is always inserted as text (never as HTML). */
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.13.0';
+  var APP_VERSION = '0.14.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var HOME_KEY = 'runway.sheet'; // only a sheet's id and name are stored; neither is secret
@@ -22,7 +22,7 @@
   var state = {
     token: null, expires: 0, user: null, sheet: loadStore(HOME_KEY), plan: loadStore(PLAN_KEY),
     role: null, planRole: null, data: null, planData: null, planError: null,
-    loadedAt: null, busy: false, error: null, saving: false, toast: null,
+    loadedAt: null, busy: false, error: null, saving: false, notice: null, drafts: {}, openForms: {},
     route: 'overview', openHomes: {}, openReq: {}, filter: 'All', taskStream: 'All', showDone: false, needSignIn: true
   };
 
@@ -320,7 +320,7 @@
         })
         .then(function () { return by; });
     }).then(function (by) {
-      state.data = { homes: buildHomes(by), tours: by.tours || [], contacts: by.contacts || [], docs: by.docs, listingHead: (by.listing && by.listing.head) || [], docsHead: (by.docs && by.docs.head) || [], tourHead: (by.tours && by.tours.head) || [], checks: buildChecks(by.checks) };
+      state.data = { homes: buildHomes(by), tours: by.tours || [], contacts: by.contacts || [], docs: by.docs, listingHead: (by.listing && by.listing.head) || [], docsHead: (by.docs && by.docs.head) || [], listingRows: by.listing || [], tourHead: (by.tours && by.tours.head) || [], checks: buildChecks(by.checks) };
     });
   }
 
@@ -492,6 +492,30 @@
     return api(homeBase() + '/values/' + enc("'Home Checks'!A1") + ':append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS',
       { method: 'POST', body: { values: [rowFrom(head, obj)] } }).then(loadHome);
   }
+  function stamp() {
+    var d = new Date();
+    return d.toLocaleDateString('en-US') + ' ' + d.getHours() + ':' + pad(d.getMinutes(), 2) + ':' + pad(d.getSeconds(), 2);
+  }
+  function commonValue(rows, key) {
+    var n = {}, best = '', bestN = 0;
+    rows.forEach(function (r) { var v = r[key]; if (v) { n[v] = (n[v] || 0) + 1; if (n[v] > bestN) { best = v; bestN = n[v]; } } });
+    return best;
+  }
+  function addHome(f) {
+    var head = state.data.listingHead, d = state.data;
+    if (head.indexOf('Home ID') < 0 || head.indexOf('Status') < 0) return Promise.reject(new Error('The Home Listing tab needs Home ID and Status columns.'));
+    var key = function (b, m, c) { return [b, m, c].map(function (t) { return String(t || '').trim().toLowerCase(); }).join('|'); };
+    if (d.homes.some(function (x) { return key(x.builder, x.model, x.community) === key(f.builder, f.model, f.community); })) return Promise.reject(new Error('That home is already in the list.'));
+    if (f.url && d.homes.some(function (x) { return x.url && x.url.trim() === f.url; })) return Promise.reject(new Error('A home with that listing link is already in the list.'));
+    var id = nextId(d.homes, 'HOME');
+    var obj = { 'Timestamp': stamp(), 'Status': f.status, 'City': f.city, 'Community': f.community, 'Builder': f.builder, 'Model': f.model,
+      'Style': f.style, 'Address': f.address, 'List Price': f.price, 'Upgrade Price': f.upgrade, 'Bedrooms': f.beds, 'Baths': f.baths, 'Sq Ft': f.sqft,
+      'Garage': f.garage, 'Listing URL': f.url, 'Contact': f.contact, 'Tel. #': f.phone, 'Notes': f.notes, 'Logged by': who(), 'Home ID': id };
+    return api(homeBase() + '/values/' + enc("'Home Listing'!A1") + ':append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS',
+      { method: 'POST', body: { values: [rowFrom(head, obj)] } }).then(loadHome).then(function () {
+        state.notice = 'Added ' + id + '. To log tours or contacts for it with the Forms, add "' + id + ' ' + (f.builder + ': ' + f.model) + '" to the "Which home?" dropdown in the Tour and Contact Forms. The Log a tour and Log a contact buttons need that option too.';
+      });
+  }
   function driveIdFrom(url) {
     var m = String(url).match(/\/d\/([A-Za-z0-9_-]{15,})/) || String(url).match(/[?&]id=([A-Za-z0-9_-]{15,})/);
     return m ? m[1] : '';
@@ -516,17 +540,38 @@
       d.status = 'Decided'; d.decidedOn = todayText(); d.reasoning = reasoning;
     });
   }
+  var toastTimer = null;
   function toast(text, bad) {
-    state.toast = { text: text, bad: !!bad }; render();
-    setTimeout(function () { state.toast = null; render(); }, 4500);
+    var el = document.getElementById('toast');
+    if (!el) { el = document.createElement('div'); el.id = 'toast'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
+    el.className = 'toast' + (bad ? ' bad' : ''); el.textContent = text; el.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { el.hidden = true; }, 4500);
+  }
+  // Typed text in the add forms survives a redraw (drafts), and forms keep their open state.
+  function keep(form, name, el) {
+    var k = form + '.' + name;
+    if (state.drafts[k] !== undefined) el.value = state.drafts[k];
+    el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', function () { state.drafts[k] = el.value; });
+    return el;
+  }
+  function clearDraft(form) {
+    Object.keys(state.drafts).forEach(function (k) { if (k.indexOf(form + '.') === 0) delete state.drafts[k]; });
+  }
+  function formAttrs(form, openByDefault) {
+    var open = state.openForms[form] === undefined ? !!openByDefault : state.openForms[form];
+    return { class: 'card addform', open: open ? true : null, ontoggle: function (e) { state.openForms[form] = e.target.open; } };
+  }
+  function submit(form, p) {
+    return p.then(function (ok) { if (ok) { clearDraft(form); render(); } });
   }
   function save(promise, okText) {
     state.saving = true; render();
-    return promise.then(function () { state.saving = false; toast(okText); })
+    return promise.then(function () { state.saving = false; toast(okText); return true; })
       .catch(function (e) {
         state.saving = false;
         var msg = e && e.message ? e.message : 'Could not save.';
-        if (/changed since/.test(msg)) loadAll().then(function () { toast(msg, true); }); else toast(msg, true);
+        if (/changed since/.test(msg)) loadAll().then(function () { toast(msg, true); }); else { toast(msg, true); render(); }
+        return false;
       });
   }
 
@@ -698,19 +743,19 @@
         t.notes ? h('div', { class: 'small' }, t.notes) : null));
   }
   function addTaskForm(P) {
-    var title = h('input', { type: 'text', maxlength: '200', placeholder: 'What needs doing' });
-    var stream = h('select', null, (P.streams.length ? P.streams : ['Other']).map(function (s) { return h('option', { value: s }, s); }));
-    var owner = h('input', { type: 'text', list: 'owners', maxlength: '40' });
+    var title = keep('task', 'title', h('input', { type: 'text', maxlength: '200', placeholder: 'What needs doing' }));
+    var stream = keep('task', 'stream', h('select', null, (P.streams.length ? P.streams : ['Other']).map(function (s) { return h('option', { value: s }, s); })));
+    var owner = keep('task', 'owner', h('input', { type: 'text', list: 'owners', maxlength: '40' }));
     var owners = {}; P.tasks.forEach(function (t) { if (t.owner) owners[t.owner] = true; });
     var dl = h('datalist', { id: 'owners' }, Object.keys(owners).map(function (o) { return h('option', { value: o }); }));
-    var due = h('input', { type: 'date' });
-    var notes = h('input', { type: 'text', maxlength: '300' });
-    return h('details', { class: 'card addform' }, h('summary', null, 'Add a task'),
+    var due = keep('task', 'due', h('input', { type: 'date' }));
+    var notes = keep('task', 'notes', h('input', { type: 'text', maxlength: '300' }));
+    return h('details', formAttrs('task'), h('summary', null, 'Add a task'),
       h('div', { class: 'stack', style: 'margin-top:14px' },
         field('Task', title), field('Workstream', stream), field('Owner', owner), dl, field('Due date (optional)', due), field('Notes (optional)', notes),
         h('button', { class: 'btn', type: 'button', style: 'align-self:flex-start', disabled: state.saving ? true : null, onclick: function () {
           if (!title.value.trim()) { toast('Give the task a title.', true); return; }
-          save(addTask({ title: title.value.trim(), stream: stream.value, owner: owner.value.trim(), due: due.value, notes: notes.value.trim() }), 'Task added');
+          submit('task', save(addTask({ title: title.value.trim(), stream: stream.value, owner: owner.value.trim(), due: due.value, notes: notes.value.trim() }), 'Task added'));
         } }, 'Add task')));
   }
   function viewTasks() {
@@ -761,17 +806,17 @@
           } }, 'Save decision'))) : null);
   }
   function addDecisionForm(P) {
-    var title = h('input', { type: 'text', maxlength: '200' });
-    var stream = h('select', null, (P.streams.length ? P.streams : ['Other']).map(function (s) { return h('option', { value: s }, s); }));
-    var options = h('input', { type: 'text', maxlength: '400' });
-    var owners = h('input', { type: 'text', maxlength: '80' });
-    var cfp = h('select', null, h('option', { value: 'No' }, 'No'), h('option', { value: 'Yes' }, 'Yes'));
-    return h('details', { class: 'card addform' }, h('summary', null, 'Add a decision'),
+    var title = keep('decision', 'title', h('input', { type: 'text', maxlength: '200' }));
+    var stream = keep('decision', 'stream', h('select', null, (P.streams.length ? P.streams : ['Other']).map(function (s) { return h('option', { value: s }, s); })));
+    var options = keep('decision', 'options', h('input', { type: 'text', maxlength: '400' }));
+    var owners = keep('decision', 'owners', h('input', { type: 'text', maxlength: '80' }));
+    var cfp = keep('decision', 'cfp', h('select', null, h('option', { value: 'No' }, 'No'), h('option', { value: 'Yes' }, 'Yes')));
+    return h('details', formAttrs('decision'), h('summary', null, 'Add a decision'),
       h('div', { class: 'stack', style: 'margin-top:14px' },
         field('Decision', title), field('Workstream', stream), field('Options (optional)', options), field('Who decides', owners), field('Needs CFP input', cfp),
         h('button', { class: 'btn', type: 'button', style: 'align-self:flex-start', disabled: state.saving ? true : null, onclick: function () {
           if (!title.value.trim()) { toast('Give the decision a title.', true); return; }
-          save(addDecision({ title: title.value.trim(), stream: stream.value, options: options.value.trim(), owners: owners.value.trim(), cfp: cfp.value }), 'Decision added');
+          submit('decision', save(addDecision({ title: title.value.trim(), stream: stream.value, options: options.value.trim(), owners: owners.value.trim(), cfp: cfp.value }), 'Decision added'));
         } }, 'Add decision')));
   }
   function viewDecisions() {
@@ -802,6 +847,36 @@
       var label = /tour/i.test(l.name) ? 'Log a tour here' : /contact/i.test(l.name) ? 'Log a contact here' : (l.name || 'Open form') + ' for this home';
       return h('a', { class: 'btn small', href: u.href, target: '_blank', rel: 'noopener noreferrer' }, label);
     });
+  }
+  function addHomeForm() {
+    var d = state.data;
+    function txt(name, max, ph) { return keep('home', name, h('input', { type: 'text', maxlength: String(max || 80), placeholder: ph || '' })); }
+    function numInput(name, ph) { return keep('home', name, h('input', { type: 'number', min: '0', step: 'any', inputmode: 'decimal', placeholder: ph || '' })); }
+    var builder = txt('builder', 60), model = txt('model', 80), community = txt('community', 80), address = txt('address', 120), contact = txt('contact', 60), phone = txt('phone', 30), notes = txt('notes', 400);
+    var cities = {}; d.homes.forEach(function (x) { if (x.city) cities[x.city] = true; });
+    var city = keep('home', 'city', h('input', { type: 'text', list: 'home-cities', maxlength: '40' }));
+    var cl = h('datalist', { id: 'home-cities' }, Object.keys(cities).map(function (c) { return h('option', { value: c }); }));
+    var price = numInput('price', 'Price'), upgrade = numInput('upgrade', 'With upgrades (optional)'), beds = numInput('beds'), baths = numInput('baths'), sqft = numInput('sqft');
+    var garage = keep('home', 'garage', h('input', { type: 'text', maxlength: '20', value: commonValue(state.data.listingRows || [], 'Garage') || '2-car' }));
+    var url = keep('home', 'url', h('input', { type: 'url', maxlength: '800', placeholder: 'https:// (optional)', inputmode: 'url' }));
+    var status = keep('home', 'status', h('select', null, STATUS_ORDER.map(function (o) { return h('option', { value: o, selected: o === 'Researching' ? true : null }, o); })));
+    var style = commonValue(state.data.listingRows || [], 'Style') || 'Ranch / Single-story';
+    return h('details', formAttrs('home'), h('summary', null, 'Add a home'),
+      h('div', { class: 'stack', style: 'margin-top:14px' },
+        h('p', { class: 'muted small' }, 'Runway gives the new home the next Home ID and adds it to the Home Listing tab.'),
+        field('Builder', builder), field('Model', model), field('Community', community), field('City', city), cl, field('Address (optional)', address),
+        field('List price', price), field('Price with upgrades (optional)', upgrade), field('Bedrooms', beds), field('Baths', baths), field('Square feet', sqft),
+        field('Garage', garage), field('Listing link (optional)', url), field('Builder contact (optional)', contact), field('Phone (optional)', phone),
+        field('Notes (optional)', notes), field('Status', status),
+        h('button', { class: 'btn', type: 'button', style: 'align-self:flex-start', disabled: state.saving ? true : null, onclick: function () {
+          if (!builder.value.trim() || !model.value.trim()) { toast('Builder and model are required.', true); return; }
+          if (!city.value.trim()) { toast('Choose or type the city.', true); return; }
+          var link = url.value.trim();
+          if (link && !/^https:\/\//i.test(link)) { toast('The listing link must start with https://', true); return; }
+          submit('home', save(addHome({ builder: builder.value.trim(), model: model.value.trim(), community: community.value.trim(), city: city.value.trim(), address: address.value.trim(),
+            price: price.value, upgrade: upgrade.value, beds: beds.value, baths: baths.value, sqft: sqft.value, garage: garage.value.trim(), style: style, url: link,
+            contact: contact.value.trim(), phone: phone.value.trim(), notes: notes.value.trim(), status: status.value }), 'Home added'));
+        } }, 'Add home')));
   }
   function reqSummary(x) {
     var P = state.planData; if (!P || !P.requirements.length) return null;
@@ -926,7 +1001,7 @@
     }
     return h('div', { class: 'stack' },
       h('div', null, h('h1', null, 'Housing'), h('p', { class: 'lede' }, 'Every home in your listing sheet, joined with tour notes and builder contacts by Home ID.')),
-      quick,
+      quick, canEditHome() ? addHomeForm() : null,
       h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by status' }, statuses.map(function (s) {
         return h('button', { class: 'chip', type: 'button', 'aria-pressed': String(state.filter === s), onclick: function () { state.filter = s; render(); } }, s);
       })),
@@ -1003,16 +1078,17 @@
 
   /* ----- Journal ----- */
   function addJournalForm(P) {
-    var title = h('input', { type: 'text', maxlength: '200', placeholder: 'A moment worth remembering' });
+    var title = keep('journal', 'title', h('input', { type: 'text', maxlength: '200', placeholder: 'A moment worth remembering' }));
     var date = h('input', { type: 'date' });
     var d0 = new Date(); date.value = d0.getFullYear() + '-' + pad(d0.getMonth() + 1, 2) + '-' + pad(d0.getDate(), 2);
-    var detail = h('textarea', { rows: '4', maxlength: '2000', placeholder: 'What happened, and how it felt' });
-    return h('details', { class: 'card addform', open: true }, h('summary', null, 'Add an entry'),
+    keep('journal', 'date', date);
+    var detail = keep('journal', 'detail', h('textarea', { rows: '4', maxlength: '2000', placeholder: 'What happened, and how it felt' }));
+    return h('details', formAttrs('journal', true), h('summary', null, 'Add an entry'),
       h('div', { class: 'stack', style: 'margin-top:14px' },
         field('Title', title), field('Date', date), field('Details (optional)', detail),
         h('button', { class: 'btn', type: 'button', style: 'align-self:flex-start', disabled: state.saving ? true : null, onclick: function () {
           if (!title.value.trim()) { toast('Give the entry a title.', true); return; }
-          save(addJournal({ title: title.value.trim(), date: date.value, detail: detail.value.trim() }), 'Entry added');
+          submit('journal', save(addJournal({ title: title.value.trim(), date: date.value, detail: detail.value.trim() }), 'Entry added'));
         } }, 'Save entry')));
   }
   function viewJournal() {
@@ -1086,18 +1162,18 @@
 
   function addDocForm() {
     var d = state.data;
-    var title = h('input', { type: 'text', maxlength: '200', placeholder: 'What the document is' });
-    var url = h('input', { type: 'url', maxlength: '800', placeholder: 'https://', inputmode: 'url' });
+    var title = keep('doc', 'title', h('input', { type: 'text', maxlength: '200', placeholder: 'What the document is' }));
+    var url = keep('doc', 'url', h('input', { type: 'url', maxlength: '800', placeholder: 'https://', inputmode: 'url' }));
     var names = {};
     ((state.planData && state.planData.streams) || []).forEach(function (n) { names[n] = true; });
     (d.docs || []).forEach(function (r) { if (r['Workstream']) names[r['Workstream']] = true; });
-    var stream = h('input', { type: 'text', list: 'doc-streams', maxlength: '60' });
+    var stream = keep('doc', 'stream', h('input', { type: 'text', list: 'doc-streams', maxlength: '60' }));
     var dl = h('datalist', { id: 'doc-streams' }, Object.keys(names).map(function (n) { return h('option', { value: n }); }));
-    var home = h('select', null, h('option', { value: '' }, 'Not about one home'), d.homes.map(function (x) { return h('option', { value: x.id }, homeFormLabel(x)); }));
-    var owner = h('input', { type: 'text', maxlength: '40' });
-    var sens = h('select', null, h('option', { value: 'Normal' }, 'Normal'), h('option', { value: 'Sensitive' }, 'Sensitive'));
-    var review = h('input', { type: 'date' });
-    return h('details', { class: 'card addform' }, h('summary', null, 'Add a document link'),
+    var home = keep('doc', 'home', h('select', null, h('option', { value: '' }, 'Not about one home'), d.homes.map(function (x) { return h('option', { value: x.id }, homeFormLabel(x)); })));
+    var owner = keep('doc', 'owner', h('input', { type: 'text', maxlength: '40' }));
+    var sens = keep('doc', 'sens', h('select', null, h('option', { value: 'Normal' }, 'Normal'), h('option', { value: 'Sensitive' }, 'Sensitive')));
+    var review = keep('doc', 'review', h('input', { type: 'date' }));
+    return h('details', formAttrs('doc'), h('summary', null, 'Add a document link'),
       h('div', { class: 'stack', style: 'margin-top:14px' },
         h('p', { class: 'muted small' }, 'Add the link only. The file stays in Drive, and Runway does not change who can open it, so share the file in Drive first. Never add account numbers, SSNs or passwords.'),
         field('Title', title), field('Link (https)', url), field('Workstream', stream), dl, field('About a home (optional)', home), field('Owner (optional)', owner),
@@ -1108,7 +1184,7 @@
           if (!/^https:\/\//i.test(link)) { toast('The link must start with https://', true); return; }
           var dup = (d.docs || []).some(function (r) { return String(r['URL'] || '').trim() === link; });
           if (dup) { toast('That link is already in the list.', true); return; }
-          save(addDocument({ title: title.value.trim(), url: link, stream: stream.value.trim(), homeId: home.value, owner: owner.value.trim(), sensitivity: sens.value, review: review.value }), 'Document added');
+          submit('doc', save(addDocument({ title: title.value.trim(), url: link, stream: stream.value.trim(), homeId: home.value, owner: owner.value.trim(), sensitivity: sens.value, review: review.value }), 'Document added'));
         } }, 'Add document')));
   }
   function viewDocuments() {
@@ -1230,8 +1306,9 @@
       state.loadedAt ? 'Loaded ' + state.loadedAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) + '. ' : '',
       'Changes to housing happen in the home-search sheet or its Forms. ',
       h('a', { href: 'privacy.html' }, 'Privacy policy'));
-    var t = state.toast ? h('div', { class: 'toast' + (state.toast.bad ? ' bad' : ''), role: 'status' }, state.toast.text) : null;
-    return h('div', null, banner, top, h('main', null, content), foot, t);
+    var note = state.notice ? h('div', { class: 'notice', role: 'status' }, h('span', null, state.notice),
+      h('button', { class: 'btn ghost small', type: 'button', onclick: function () { state.notice = null; render(); } }, 'Dismiss')) : null;
+    return h('div', null, banner, top, note, h('main', null, content), foot);
   }
 
   function render() {

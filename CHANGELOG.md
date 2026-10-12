@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.0
+- New: editors can add a home from the Housing page. Runway gives it the next Home ID, adds it to the Home Listing tab with status Researching (or the status you choose), and records who added it. It fills Style and Garage with the most common values already in the sheet. Duplicate homes (same builder, model and community, or the same listing link) are refused.
+- New: after adding a home, a notice reminds you to add the new "HOME-### Builder: Model" option to the "Which home?" dropdown in the Tour and Contact Forms, which the pre-filled buttons need.
+- Fixed: a message such as "Give the task a title" no longer redraws the page and clears what you typed. Typed text in every add form (task, decision, journal, document, home) survives a redraw, and each form stays open.
+- Changed: messages now appear without redrawing the page.
+
 ## 0.13.0
 - New: each home's card has a Requirements checklist. Every requirement shows Yes, No or Unknown. Answers come from the home's latest Tour Notes entry when the requirement is linked to a Yes/No Tour Notes column, and from checks that people with edit access record in Runway. A check made in Runway overrides the Tour Notes answer, and tapping the same button again clears it.
 - New: the card shows a count, for example "21 of 38 requirements met, 2 not met". It is highlighted when a requirement marked Must is not met.
