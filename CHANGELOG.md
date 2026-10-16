@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.17.0
+- New: each home's card has a Log a tour form for people with edit access (stage 1 of replacing the Tour Notes Form). It asks for the visit date, a one-tap Yes or No on up to 19 features you check on a visit (only those with a matching column in the Tour Notes tab), an overall impression, pros, cons, HOA, a Decision and optional decision notes.
+- Runway writes one row to the Home Tour Notes tab in the Form's own columns: home identification, community, address, "Which home?", who logged it and when. The blank gap column and the Home ID formula column are left alone, so the Home ID fills in by itself.
+- The home's requirements checklist and the Compare page use the new answers straight away.
+- Optional (on by default): also set the home's status in Home Listing to the Decision. Choosing Rejected asks for at least one reason.
+- Safeguards: a visit date is required, a second tour of the same home on the same date is refused, and typed text is saved as plain text.
+- Not in stage 1: the remaining Form fields (lot, package and kitchen details, appliances list, builder vetting). Keep using the Form for those until stage 2.
+
 ## 0.16.1
 - Fixed: choosing the wrong file as the home-search sheet or the planning sheet (a file without the tabs Runway needs) left the person stuck, with no way to choose again. The error now says "That does not look like the right sheet" and offers a Choose sheet button (Choose planning sheet for the planning sheet).
 - Fixed: the Sheets page now opens even when a sheet failed to load, and shows the name of the file that was chosen, so a wrong choice can always be changed.
