@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.18.0
+- New: Log a tour is now a full-screen page, reached from a button on each home's card. It is organized room by room: Outside and lot, Living areas, Kitchen, Laundry, mud room and garage, Primary suite, Primary bath, Utilities, package and HOA, Builder, and Overall. Tap the room you are in; each room chip shows how many answers you have given there. Previous and Next buttons walk you through.
+- Every Tour Notes question is covered (all the columns the Tour Form fills): Yes or No taps, pick-one chips, tick boxes for appliances, type-or-tap suggestions built from your past answers, notes and numbers. A question only appears if its column exists in the sheet.
+- Your answers are saved on the device as you go, so a lost signal or a locked screen does not lose a tour. They are cleared when you save, discard, or sign out. A card shows "Continue your tour draft" while one is waiting.
+- Runway writes one Tour Notes row in the Form's own columns, leaves the blank gap and Home ID formula columns alone, and keeps the earlier safeguards (visit date required, one tour per home per day, plain-text escaping, optional status sync with rejection reasons).
+- The privacy policy now describes the saved draft.
+- Fixed: this replaces the smaller in-card form from 0.17.0.
+
 ## 0.17.0
 - New: each home's card has a Log a tour form for people with edit access (stage 1 of replacing the Tour Notes Form). It asks for the visit date, a one-tap Yes or No on up to 19 features you check on a visit (only those with a matching column in the Tour Notes tab), an overall impression, pros, cons, HOA, a Decision and optional decision notes.
 - Runway writes one row to the Home Tour Notes tab in the Form's own columns: home identification, community, address, "Which home?", who logged it and when. The blank gap column and the Home ID formula column are left alone, so the Home ID fills in by itself.
