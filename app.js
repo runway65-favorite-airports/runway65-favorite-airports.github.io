@@ -1,13 +1,13 @@
-/* Runway v0.16.1.
+/* Runway v0.17.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
-   - Editors (by Google's sharing settings) can check off tasks, add tasks, decisions and journal entries, and change a home's status pick why a home was rejected, keep the tour Decision in step with the status, add document links, check each home against the requirements, add a home, and log a builder contact.
+   - Editors (by Google's sharing settings) can check off tasks, add tasks, decisions and journal entries, and change a home's status pick why a home was rejected, keep the tour Decision in step with the status, add document links, check each home against the requirements, add a home, log a builder contact, and log a tour.
    Sheet text is always inserted as text (never as HTML). */
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.16.1';
+  var APP_VERSION = '0.17.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var HOME_KEY = 'runway.sheet'; // only a sheet's id and name are stored; neither is secret
@@ -530,6 +530,23 @@
     return api(homeBase() + '/values/' + enc("'Contacts Log'!A1") + ':append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS',
       { method: 'POST', body: { values: [rowLoose(head, obj)] } }).then(loadHome);
   }
+  function addTourRow(x, f) {
+    var head = state.data.tourHead;
+    if (!head.length) return Promise.reject(new Error('The Home Tour Notes tab was not found.'));
+    var date = isoToUs(f.date);
+    var again = (state.data.tours || []).some(function (r) { return r['Home ID'] === x.id && String(r['Visit Date'] || '').trim() === date; });
+    if (again) return Promise.reject(new Error('A tour of this home on that date is already logged.'));
+    var obj = { 'Timestamp': stamp(), 'Home Identification': (x.builder + (x.model ? ' - ' + x.model : '')).trim(), 'Community': x.community, 'Visit Date': date,
+      'HOA Monthly': f.hoa, 'Overall Impression': f.impression, 'Pros': f.pros, 'Cons': f.cons, 'Decision': f.decision, 'Decision Notes': f.decisionNotes,
+      'Address': x.address, 'Which home?': homeFormLabel(x), 'Logged by': who() };
+    f.answers.forEach(function (a) { if (a.value) obj[a.header] = a.value; });
+    return api(homeBase() + '/values/' + enc("'Home Tour Notes'!A1") + ':append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS',
+      { method: 'POST', body: { values: [rowLoose(head, obj)] } }).then(loadHome).then(function () {
+        if (!f.syncStatus) return null;
+        var fresh = state.data.homes.filter(function (hm) { return hm.id === x.id; })[0];
+        return fresh ? setHomeStatus(fresh, f.decision, f.reasons, false) : null;
+      });
+  }
   function driveIdFrom(url) {
     var m = String(url).match(/\/d\/([A-Za-z0-9_-]{15,})/) || String(url).match(/[?&]id=([A-Za-z0-9_-]{15,})/);
     return m ? m[1] : '';
@@ -895,6 +912,67 @@
             contact: contact.value.trim(), phone: phone.value.trim(), notes: notes.value.trim(), status: status.value }), 'Home added'));
         } }, 'Add home')));
   }
+  // Yes/No questions on the Tour Notes tab. Only those whose column exists in the sheet are shown.
+  var TOUR_YESNO = [['Enclosed WC', 'Enclosed WC'], ['Walk-in Pantry', 'Walk-in pantry'], ['Flex Room', 'Flex room'], ['Walk-in Closet', 'Walk-in closet'],
+    ['Curbless / Zero-Threshold Shower', 'Curbless shower'], ['Grab Bar Blocking Available', 'Grab-bar blocking'], ['Large Island', 'Large island'],
+    ['Center Island Sink', 'Center island has a main sink (you want No)'], ['Room Choice / Layout Flexibility', 'Room choice and layout flexibility'],
+    ['Zero-Step Entry (Front Door)', 'Zero-step entry, front door'], ['Zero-Step Entry (Garage)', 'Zero-step entry, garage'], ['Wider Doorways / Hallways', 'Wider doorways and hallways (32 in or more)'],
+    ['Covered Porch', 'Covered porch'], ['Covered Patio', 'Covered patio'], ['Separate Mud Room', 'Separate mud room'], ['EV Charger / 240V Prewire in Garage', 'EV charger or 240V prewire in the garage'],
+    ['GFCI Outlet Near Owner', 'GFCI outlet near the owner\'s suite toilet'], ['Buyer References Provided', 'Buyer references provided'], ['Stainless Steel Appliances', 'Stainless steel appliances']];
+  function tourQuestions() {
+    var head = state.data.tourHead || [];
+    return TOUR_YESNO.map(function (q) {
+      var want = normKey(q[0]), header = '';
+      head.forEach(function (hd) { if (!header && hd && normKey(hd).indexOf(want) === 0) header = hd; });
+      return header ? { header: header, label: q[1] } : null;
+    }).filter(Boolean);
+  }
+  function tourForm(x) {
+    if (!canEditHome() || !(state.data.tourHead || []).length) return null;
+    var k = 'tour-' + x.id, qs = tourQuestions();
+    function draft(n, dflt) { return state.drafts[k + '.' + n] !== undefined ? state.drafts[k + '.' + n] : dflt; }
+    var date = h('input', { type: 'date' });
+    var d0 = new Date(); date.value = d0.getFullYear() + '-' + pad(d0.getMonth() + 1, 2) + '-' + pad(d0.getDate(), 2); keep(k, 'date', date);
+    var hoa = keep(k, 'hoa', h('input', { type: 'text', maxlength: '20', inputmode: 'decimal', placeholder: 'Monthly, if known' }));
+    var impression = keep(k, 'impression', h('input', { type: 'text', maxlength: '200', placeholder: 'One line' }));
+    var pros = keep(k, 'pros', h('textarea', { rows: '3', maxlength: '2000' })), cons = keep(k, 'cons', h('textarea', { rows: '3', maxlength: '2000' }));
+    var notes = keep(k, 'notes', h('input', { type: 'text', maxlength: '300' }));
+    var decision = keep(k, 'decision', h('select', null, STATUS_ORDER.map(function (o) { return h('option', { value: o, selected: o === 'Toured' ? true : null }, o); })));
+    var syncOn = draft('sync', '1') === '1';
+    var sync = h('input', { type: 'checkbox', checked: syncOn ? true : null, 'aria-label': 'Also set the home status to match' });
+    sync.addEventListener('change', function () { state.drafts[k + '.sync'] = sync.checked ? '1' : '0'; });
+    var boxes = REASONS.map(function (r) {
+      var b = h('input', { type: 'checkbox', checked: draft('r:' + r, '0') === '1' ? true : null, 'aria-label': r });
+      b.addEventListener('change', function () { state.drafts[k + '.r:' + r] = b.checked ? '1' : '0'; });
+      return b;
+    });
+    var group = h('fieldset', { class: 'reasons', hidden: decision.value === 'Rejected' ? null : true }, h('legend', null, 'Why was it rejected? Pick all that apply.'),
+      REASONS.map(function (r, i) { return h('label', null, boxes[i], r); }));
+    decision.addEventListener('change', function () { group.hidden = decision.value !== 'Rejected'; });
+    var rows = qs.map(function (q) {
+      var cur = draft('a:' + q.header, '');
+      return h('li', { class: 'req' }, h('div', { class: 'tbody' }, h('div', { class: 'ttitle' }, q.label)),
+        h('div', { class: 'chips', style: 'gap:6px' }, ['Yes', 'No'].map(function (v) {
+          return h('button', { type: 'button', class: 'seg', 'aria-pressed': String(cur === v), 'aria-label': v + ': ' + q.label,
+            onclick: function () { state.drafts[k + '.a:' + q.header] = cur === v ? '' : v; render(); } }, v);
+        })));
+    });
+    return h('details', formAttrs(k, false, 'subform'), h('summary', null, 'Log a tour'),
+      h('div', { class: 'stack', style: 'margin-top:12px' },
+        h('p', { class: 'muted small' }, 'Tap Yes or No for what you saw. Leave a question alone if you did not check it. It records the same row as the Tour Notes Form.'),
+        field('Visit date', date), h('div', null, h('h3', null, 'What you saw'), h('ul', { class: 'tasks' }, rows)),
+        field('Overall impression', impression), field('Pros', pros), field('Cons', cons), field('HOA monthly (optional)', hoa),
+        field('Decision', decision), group, field('Decision notes (optional)', notes),
+        h('label', { class: 'sync' }, sync, 'Also set this home\'s status in Home Listing to the Decision'),
+        h('button', { class: 'btn small', type: 'button', style: 'align-self:flex-start', disabled: state.saving ? true : null, onclick: function () {
+          if (!date.value) { toast('Choose the visit date.', true); return; }
+          var useSync = sync.checked, reasons = REASONS.filter(function (r, i) { return boxes[i].checked; });
+          if (useSync && decision.value === 'Rejected' && !reasons.length) { toast('Pick at least one reason for the rejection.', true); return; }
+          var answers = qs.map(function (q) { return { header: q.header, value: draft('a:' + q.header, '') }; });
+          submit(k, save(addTourRow(x, { date: date.value, hoa: hoa.value.trim(), impression: impression.value.trim(), pros: pros.value.trim(), cons: cons.value.trim(),
+            decision: decision.value, decisionNotes: notes.value.trim(), answers: answers, syncStatus: useSync, reasons: reasons }), 'Tour logged'));
+        } }, 'Save tour')));
+  }
   var CHANNELS = ['In Person', 'Email', 'Phone', 'Text', 'Online form'];
   var DIRECTIONS = ['Inbound', 'Outbound', 'Meeting'];
   function contactForm(x) {
@@ -1015,6 +1093,7 @@
             c['Summary'] ? h('div', { class: 'small' }, c['Summary']) : null);
         }))) : null,
         reqChecklist(x),
+        tourForm(x),
         contactForm(x),
         statusEditor(x),
         h('div', { class: 'chips' }, homeLinks(x), x.url ? h('a', { class: 'btn ghost small', href: x.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open listing') : null)
