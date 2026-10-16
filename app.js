@@ -1,15 +1,16 @@
-/* Runway v0.17.0.
+/* Runway v0.18.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
-   - Editors (by Google's sharing settings) can check off tasks, add tasks, decisions and journal entries, and change a home's status pick why a home was rejected, keep the tour Decision in step with the status, add document links, check each home against the requirements, add a home, log a builder contact, and log a tour.
+   - Editors (by Google's sharing settings) can check off tasks, add tasks, decisions and journal entries, and change a home's status pick why a home was rejected, keep the tour Decision in step with the status, add document links, check each home against the requirements, add a home, log a builder contact, and log a tour room by room.
    Sheet text is always inserted as text (never as HTML). */
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.17.0';
+  var APP_VERSION = '0.18.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
+  var DRAFT_KEY = 'runway.tourdrafts'; // half-finished tours, kept on this device only
   var HOME_KEY = 'runway.sheet'; // only a sheet's id and name are stored; neither is secret
   var PLAN_KEY = 'runway.plan';
   var TABS = { listing: 'Home Listing', tours: 'Home Tour Notes', contacts: 'Contacts Log' };
@@ -22,7 +23,7 @@
   var state = {
     token: null, expires: 0, user: null, sheet: loadStore(HOME_KEY), plan: loadStore(PLAN_KEY),
     role: null, planRole: null, data: null, planData: null, planError: null,
-    loadedAt: null, busy: false, error: null, saving: false, notice: null, drafts: {}, openForms: {},
+    loadedAt: null, busy: false, error: null, saving: false, notice: null, drafts: loadDrafts(), openForms: {}, tourRoom: {}, routeArg: '',
     route: 'overview', openHomes: {}, openReq: {}, compareIds: null, compareDiff: false, filter: 'All', taskStream: 'All', showDone: false, needSignIn: true
   };
 
@@ -537,7 +538,6 @@
     var again = (state.data.tours || []).some(function (r) { return r['Home ID'] === x.id && String(r['Visit Date'] || '').trim() === date; });
     if (again) return Promise.reject(new Error('A tour of this home on that date is already logged.'));
     var obj = { 'Timestamp': stamp(), 'Home Identification': (x.builder + (x.model ? ' - ' + x.model : '')).trim(), 'Community': x.community, 'Visit Date': date,
-      'HOA Monthly': f.hoa, 'Overall Impression': f.impression, 'Pros': f.pros, 'Cons': f.cons, 'Decision': f.decision, 'Decision Notes': f.decisionNotes,
       'Address': x.address, 'Which home?': homeFormLabel(x), 'Logged by': who() };
     f.answers.forEach(function (a) { if (a.value) obj[a.header] = a.value; });
     return api(homeBase() + '/values/' + enc("'Home Tour Notes'!A1") + ':append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS',
@@ -579,21 +579,33 @@
     clearTimeout(toastTimer); toastTimer = setTimeout(function () { el.hidden = true; }, 4500);
   }
   // Typed text in the add forms survives a redraw (drafts), and forms keep their open state.
+  function loadDrafts() {
+    try { var d = JSON.parse(localStorage.getItem(DRAFT_KEY) || '{}'); return d && typeof d === 'object' ? d : {}; } catch (e) { return {}; }
+  }
+  function persistDrafts() {
+    try {
+      var kept = {};
+      Object.keys(state.drafts).forEach(function (k) { if (k.indexOf('tour-') === 0 && state.drafts[k] !== '') kept[k] = state.drafts[k]; });
+      if (Object.keys(kept).length) localStorage.setItem(DRAFT_KEY, JSON.stringify(kept)); else localStorage.removeItem(DRAFT_KEY);
+    } catch (e) { /* storage unavailable */ }
+  }
+  function setDraft(k, v) { state.drafts[k] = v; if (k.indexOf('tour-') === 0) persistDrafts(); }
   function keep(form, name, el) {
     var k = form + '.' + name;
     if (state.drafts[k] !== undefined) el.value = state.drafts[k];
-    el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', function () { state.drafts[k] = el.value; });
+    el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', function () { setDraft(k, el.value); });
     return el;
   }
   function clearDraft(form) {
     Object.keys(state.drafts).forEach(function (k) { if (k.indexOf(form + '.') === 0) delete state.drafts[k]; });
+    persistDrafts();
   }
   function formAttrs(form, openByDefault, cls) {
     var open = state.openForms[form] === undefined ? !!openByDefault : state.openForms[form];
     return { class: cls || 'card addform', open: open ? true : null, ontoggle: function (e) { state.openForms[form] = e.target.open; } };
   }
-  function submit(form, p) {
-    return p.then(function (ok) { if (ok) { clearDraft(form); render(); } });
+  function submit(form, p, after) {
+    return p.then(function (ok) { if (ok) { clearDraft(form); if (after) after(); render(); } });
   }
   function save(promise, okText) {
     state.saving = true; render();
@@ -626,7 +638,7 @@
   function doPickPlan() { choose('Choose your Runway planning sheet', PLAN_KEY, function (s) { state.plan = s; state.planData = null; state.planRole = null; }); }
   function doSignOut() {
     var t = state.token;
-    state.token = null; state.expires = 0; state.user = null; state.data = null; state.planData = null;
+    state.drafts = {}; persistDrafts(); state.token = null; state.expires = 0; state.user = null; state.data = null; state.planData = null;
     state.role = null; state.planRole = null; state.needSignIn = true; state.error = null; state.planError = null;
     try { if (t && window.google && google.accounts) google.accounts.oauth2.revoke(t, function () {}); } catch (e) { /* ignore */ }
     render();
@@ -912,66 +924,183 @@
             contact: contact.value.trim(), phone: phone.value.trim(), notes: notes.value.trim(), status: status.value }), 'Home added'));
         } }, 'Add home')));
   }
-  // Yes/No questions on the Tour Notes tab. Only those whose column exists in the sheet are shown.
-  var TOUR_YESNO = [['Enclosed WC', 'Enclosed WC'], ['Walk-in Pantry', 'Walk-in pantry'], ['Flex Room', 'Flex room'], ['Walk-in Closet', 'Walk-in closet'],
-    ['Curbless / Zero-Threshold Shower', 'Curbless shower'], ['Grab Bar Blocking Available', 'Grab-bar blocking'], ['Large Island', 'Large island'],
-    ['Center Island Sink', 'Center island has a main sink (you want No)'], ['Room Choice / Layout Flexibility', 'Room choice and layout flexibility'],
-    ['Zero-Step Entry (Front Door)', 'Zero-step entry, front door'], ['Zero-Step Entry (Garage)', 'Zero-step entry, garage'], ['Wider Doorways / Hallways', 'Wider doorways and hallways (32 in or more)'],
-    ['Covered Porch', 'Covered porch'], ['Covered Patio', 'Covered patio'], ['Separate Mud Room', 'Separate mud room'], ['EV Charger / 240V Prewire in Garage', 'EV charger or 240V prewire in the garage'],
-    ['GFCI Outlet Near Owner', 'GFCI outlet near the owner\'s suite toilet'], ['Buyer References Provided', 'Buyer references provided'], ['Stainless Steel Appliances', 'Stainless steel appliances']];
-  function tourQuestions() {
-    var head = state.data.tourHead || [];
-    return TOUR_YESNO.map(function (q) {
-      var want = normKey(q[0]), header = '';
-      head.forEach(function (hd) { if (!header && hd && normKey(hd).indexOf(want) === 0) header = hd; });
-      return header ? { header: header, label: q[1] } : null;
-    }).filter(Boolean);
+  // The tour, grouped by where you stand. Only fields whose column exists in the Tour Notes tab are shown.
+  // t: yn (Yes/No taps), chips (pick one), multi (tick several), suggest (type or tap a past answer), text, long, num
+  var TOUR_ROOMS = [
+    { id: 'outside', title: 'Outside and lot', fields: [
+      { h: 'Lot Size (sq ft)', label: 'Lot size (sq ft)', t: 'num' }, { h: 'House Spacing', label: 'House spacing', t: 'chips', opts: ['Close', 'Moderate', 'Well-spaced'] },
+      { h: 'House Size (sq ft)', label: 'House size (sq ft)', t: 'num' }, { h: 'Covered Porch', label: 'Covered porch', t: 'yn' }, { h: 'Covered Patio', label: 'Covered patio', t: 'yn' },
+      { h: 'Zero-Step Entry (Front Door)', label: 'Zero-step entry, front door', t: 'yn' }, { h: 'Exterior Note', label: 'Exterior notes', t: 'long' } ] },
+    { id: 'living', title: 'Living areas', fields: [
+      { h: 'Flex Room', label: 'Flex room', t: 'yn' }, { h: 'Room Choice / Layout Flexibility', label: 'Room choice and layout flexibility', t: 'yn' },
+      { h: 'Wider Doorways / Hallways', label: 'Wider doorways and hallways (32 in or more)', t: 'yn' }, { h: 'Powder Room', label: 'Powder room', t: 'yn' },
+      { h: 'Recessed Lighting', label: 'Recessed lighting', t: 'yn' }, { h: 'Ceiling Fans', label: 'Ceiling fans', t: 'chips', opts: ['Yes', 'No', 'Junction box only'] },
+      { h: 'Blinds Included', label: 'Blinds included', t: 'yn' } ] },
+    { id: 'kitchen', title: 'Kitchen', fields: [
+      { h: 'Cooking Appliance Layout', label: 'Cooking appliance layout', t: 'suggest' }, { h: 'Walk-in Pantry', label: 'Walk-in pantry', t: 'yn' },
+      { h: 'Large Island', label: 'Large island', t: 'yn' }, { h: 'Center Island Sink', label: 'Center island has a main sink (you want No)', t: 'yn' },
+      { h: 'Stainless Steel Appliances', label: 'Stainless steel appliances', t: 'yn' },
+      { h: 'Appliances Included', label: 'Appliances included', t: 'multi', opts: ['Refrigerator', 'Microwave', 'Oven', 'Range', 'Hood with Exterior Vent', 'Dishwasher', 'Washer / Dryer'] },
+      { h: 'Kitchen Upgrade Package Available', label: 'Kitchen upgrade package available', t: 'yn' }, { h: 'Kitchen Upgrade Notes', label: 'Kitchen upgrade notes', t: 'text' },
+      { h: 'Kitchen Notes', label: 'Kitchen notes', t: 'long' } ] },
+    { id: 'laundry', title: 'Laundry, mud room and garage', fields: [
+      { h: 'Laundry Tub', label: 'Laundry tub', t: 'yn' }, { h: 'Separate Mud Room', label: 'Separate mud room', t: 'yn' },
+      { h: 'Zero-Step Entry (Garage)', label: 'Zero-step entry, garage', t: 'yn' }, { h: 'EV Charger / 240V Prewire in Garage', label: 'EV charger or 240V prewire in the garage', t: 'yn' } ] },
+    { id: 'suite', title: 'Primary suite', fields: [
+      { h: 'Walk-in Closet', label: 'Walk-in closet', t: 'yn' }, { h: 'Primary Suite Notes', label: 'Primary suite notes', t: 'long' } ] },
+    { id: 'bath', title: 'Primary bath', fields: [
+      { h: 'Enclosed WC', label: 'Enclosed WC', t: 'yn' }, { h: 'Tub Included', label: 'Tub included', t: 'yn' }, { h: 'Shower Type', label: 'Shower type', t: 'chips', opts: ['Standard', 'Oversize'] },
+      { h: 'Curbless / Zero-Threshold Shower', label: 'Curbless shower', t: 'yn' }, { h: 'Grab Bar Blocking Available', label: 'Grab-bar blocking', t: 'yn' },
+      { h: 'Bidet Available', label: 'Bidet available', t: 'yn' }, { h: 'GFCI Outlet Near Owner', label: 'GFCI outlet near the owner\'s suite toilet', t: 'yn' },
+      { h: 'Primary Bath Notes', label: 'Primary bath notes', t: 'long' } ] },
+    { id: 'package', title: 'Utilities, package and HOA', fields: [
+      { h: 'Utilities', label: 'Utilities', t: 'suggest', opts: ['Electric Only', 'Unknown'] }, { h: 'HOA Monthly', label: 'HOA monthly ($)', t: 'num' },
+      { h: 'HOA Includes', label: 'HOA includes', t: 'text' }, { h: 'Package Notes', label: 'Package notes', t: 'long' } ] },
+    { id: 'builder', title: 'Builder', fields: [
+      { h: 'Builder Reputation', label: 'Builder reputation', t: 'suggest' }, { h: 'GuildQuality Score', label: 'GuildQuality score (%)', t: 'num' },
+      { h: 'Buyer References Provided', label: 'Buyer references provided', t: 'yn' }, { h: 'Warranty Terms', label: 'Warranty terms', t: 'long' } ] },
+    { id: 'overall', title: 'Overall', fields: [
+      { h: 'Overall Impression', label: 'Overall impression', t: 'text' }, { h: 'Pros', label: 'Pros', t: 'long' }, { h: 'Cons', label: 'Cons', t: 'long' },
+      { h: 'Decision Notes', label: 'Decision notes', t: 'text' } ] }
+  ];
+  function matchHeader(head, name) {
+    var want = normKey(name), found = '';
+    head.forEach(function (hd) { if (!found && hd && normKey(hd) === want) found = hd; });
+    head.forEach(function (hd) { if (!found && hd && normKey(hd).indexOf(want) === 0) found = hd; });
+    return found;
   }
-  function tourForm(x) {
+  function observed(header) {
+    var n = {}, order = [];
+    (state.data.tours || []).forEach(function (r) {
+      var v = String(r[header] || '').trim();
+      if (v && v.length <= 80) { if (!n[v]) { n[v] = 0; order.push(v); } n[v]++; }
+    });
+    return order.sort(function (a, b) { return n[b] - n[a]; });
+  }
+  function tourFieldKey(x, header) { return 'tour-' + x.id + '.f:' + header; }
+  function tourRoomsFor() {
+    var head = state.data.tourHead || [];
+    return TOUR_ROOMS.map(function (room) {
+      return { id: room.id, title: room.title, fields: room.fields.map(function (f) {
+        var header = matchHeader(head, f.h);
+        return header ? { header: header, label: f.label, t: f.t, opts: f.opts || [] } : null;
+      }).filter(Boolean) };
+    }).filter(function (room) { return room.fields.length || room.id === 'overall'; });
+  }
+  function tourDraftCount(x) {
+    var p = 'tour-' + x.id + '.';
+    return Object.keys(state.drafts).filter(function (k) { return k.indexOf(p) === 0 && state.drafts[k] !== '' && k !== p + 'date'; }).length;
+  }
+  function tourStart(x) {
     if (!canEditHome() || !(state.data.tourHead || []).length) return null;
-    var k = 'tour-' + x.id, qs = tourQuestions();
-    function draft(n, dflt) { return state.drafts[k + '.' + n] !== undefined ? state.drafts[k + '.' + n] : dflt; }
+    return h('a', { class: 'btn small', href: '#/tour/' + enc(x.id), style: 'align-self:flex-start' }, tourDraftCount(x) ? 'Continue your tour draft' : 'Log a tour');
+  }
+  function fieldControl(x, f) {
+    var key = tourFieldKey(x, f.header), cur = state.drafts[key] || '';
+    function set(v) { setDraft(key, v); render(); }
+    if (f.t === 'yn' || f.t === 'chips') {
+      var opts = f.t === 'yn' ? ['Yes', 'No'] : f.opts;
+      return h('div', { class: 'chips', style: 'gap:6px' }, opts.map(function (o) {
+        return h('button', { type: 'button', class: 'seg', 'aria-pressed': String(cur === o), 'aria-label': f.label + ': ' + o, onclick: function () { set(cur === o ? '' : o); } }, o);
+      }));
+    }
+    if (f.t === 'multi') {
+      var base = f.opts.slice(), have = splitReasons(cur);
+      observed(f.header).forEach(function (v) { splitReasons(v).forEach(function (t) { if (base.indexOf(t) < 0) base.push(t); }); });
+      have.forEach(function (t) { if (base.indexOf(t) < 0) base.push(t); });
+      return h('div', { class: 'reasons', style: 'border:0;padding:0' }, base.map(function (o) {
+        var box = h('input', { type: 'checkbox', checked: have.indexOf(o) >= 0 ? true : null, 'aria-label': o });
+        box.addEventListener('change', function () {
+          var next = base.filter(function (t) { return t === o ? box.checked : have.indexOf(t) >= 0; });
+          set(next.join(', '));
+        });
+        return h('label', null, box, o);
+      }));
+    }
+    if (f.t === 'long') return keep('tour-' + x.id, 'f:' + f.header, h('textarea', { rows: '3', maxlength: '2000', 'aria-label': f.label }));
+    var input = h('input', { type: 'text', maxlength: '300', 'aria-label': f.label });
+    if (f.t === 'num') input.setAttribute('inputmode', 'decimal');
+    if (f.t === 'suggest') {
+      var seen = {}, list = [];
+      (f.opts || []).concat(observed(f.header)).forEach(function (v) { if (!seen[v]) { seen[v] = true; list.push(v); } });
+      var id = 'dl-' + normKey(f.header);
+      input.setAttribute('list', id);
+      return h('div', null, keep('tour-' + x.id, 'f:' + f.header, input), h('datalist', { id: id }, list.map(function (v) { return h('option', { value: v }); })));
+    }
+    return keep('tour-' + x.id, 'f:' + f.header, input);
+  }
+  function viewTour() {
+    var back = h('a', { href: '#/housing', class: 'btn ghost small', style: 'align-self:flex-start' }, 'Back to Housing');
+    var x = state.data.homes.filter(function (hm) { return hm.id === state.routeArg; })[0];
+    if (!x) return h('div', { class: 'stack' }, pageHead('Log a tour', 'That home was not found.'), back);
+    if (!canEditHome() || !(state.data.tourHead || []).length) return h('div', { class: 'stack' }, pageHead('Log a tour', 'Only people with edit access can log a tour.'), back);
+    var k = 'tour-' + x.id, rooms = tourRoomsFor();
+    var roomId = state.tourRoom[x.id] && rooms.some(function (r) { return r.id === state.tourRoom[x.id]; }) ? state.tourRoom[x.id] : rooms[0].id;
+    var idx = 0; rooms.forEach(function (r, i) { if (r.id === roomId) idx = i; });
+    var room = rooms[idx];
+    function answered(r) { return r.fields.filter(function (f) { return (state.drafts[tourFieldKey(x, f.header)] || '') !== ''; }).length; }
+    function goRoom(i) { state.tourRoom[x.id] = rooms[i].id; render(); try { window.scrollTo(0, 0); } catch (e) { /* ignore */ } }
+
     var date = h('input', { type: 'date' });
     var d0 = new Date(); date.value = d0.getFullYear() + '-' + pad(d0.getMonth() + 1, 2) + '-' + pad(d0.getDate(), 2); keep(k, 'date', date);
-    var hoa = keep(k, 'hoa', h('input', { type: 'text', maxlength: '20', inputmode: 'decimal', placeholder: 'Monthly, if known' }));
-    var impression = keep(k, 'impression', h('input', { type: 'text', maxlength: '200', placeholder: 'One line' }));
-    var pros = keep(k, 'pros', h('textarea', { rows: '3', maxlength: '2000' })), cons = keep(k, 'cons', h('textarea', { rows: '3', maxlength: '2000' }));
-    var notes = keep(k, 'notes', h('input', { type: 'text', maxlength: '300' }));
+    var chips = rooms.map(function (r, i) {
+      var n = answered(r);
+      return h('button', { type: 'button', class: 'chip', 'aria-pressed': String(r.id === roomId), onclick: function () { goRoom(i); } }, r.title + (n ? ' (' + n + ')' : ''));
+    });
+
+    var body = room.fields.map(function (f) {
+      return h('div', { class: 'tfield' }, h('div', { class: 'ttitle' }, f.label), fieldControl(x, f));
+    });
     var decision = keep(k, 'decision', h('select', null, STATUS_ORDER.map(function (o) { return h('option', { value: o, selected: o === 'Toured' ? true : null }, o); })));
-    var syncOn = draft('sync', '1') === '1';
-    var sync = h('input', { type: 'checkbox', checked: syncOn ? true : null, 'aria-label': 'Also set the home status to match' });
-    sync.addEventListener('change', function () { state.drafts[k + '.sync'] = sync.checked ? '1' : '0'; });
+    var syncOn = (state.drafts[k + '.sync'] === undefined ? '1' : state.drafts[k + '.sync']) === '1';
+    var sync = h('input', { type: 'checkbox', checked: syncOn ? true : null, 'aria-label': 'Also set the home status to the Decision' });
+    sync.addEventListener('change', function () { setDraft(k + '.sync', sync.checked ? '1' : '0'); });
     var boxes = REASONS.map(function (r) {
-      var b = h('input', { type: 'checkbox', checked: draft('r:' + r, '0') === '1' ? true : null, 'aria-label': r });
-      b.addEventListener('change', function () { state.drafts[k + '.r:' + r] = b.checked ? '1' : '0'; });
+      var b = h('input', { type: 'checkbox', checked: state.drafts[k + '.r:' + r] === '1' ? true : null, 'aria-label': r });
+      b.addEventListener('change', function () { setDraft(k + '.r:' + r, b.checked ? '1' : '0'); });
       return b;
     });
     var group = h('fieldset', { class: 'reasons', hidden: decision.value === 'Rejected' ? null : true }, h('legend', null, 'Why was it rejected? Pick all that apply.'),
       REASONS.map(function (r, i) { return h('label', null, boxes[i], r); }));
-    decision.addEventListener('change', function () { group.hidden = decision.value !== 'Rejected'; });
-    var rows = qs.map(function (q) {
-      var cur = draft('a:' + q.header, '');
-      return h('li', { class: 'req' }, h('div', { class: 'tbody' }, h('div', { class: 'ttitle' }, q.label)),
-        h('div', { class: 'chips', style: 'gap:6px' }, ['Yes', 'No'].map(function (v) {
-          return h('button', { type: 'button', class: 'seg', 'aria-pressed': String(cur === v), 'aria-label': v + ': ' + q.label,
-            onclick: function () { state.drafts[k + '.a:' + q.header] = cur === v ? '' : v; render(); } }, v);
-        })));
-    });
-    return h('details', formAttrs(k, false, 'subform'), h('summary', null, 'Log a tour'),
-      h('div', { class: 'stack', style: 'margin-top:12px' },
-        h('p', { class: 'muted small' }, 'Tap Yes or No for what you saw. Leave a question alone if you did not check it. It records the same row as the Tour Notes Form.'),
-        field('Visit date', date), h('div', null, h('h3', null, 'What you saw'), h('ul', { class: 'tasks' }, rows)),
-        field('Overall impression', impression), field('Pros', pros), field('Cons', cons), field('HOA monthly (optional)', hoa),
-        field('Decision', decision), group, field('Decision notes (optional)', notes),
-        h('label', { class: 'sync' }, sync, 'Also set this home\'s status in Home Listing to the Decision'),
-        h('button', { class: 'btn small', type: 'button', style: 'align-self:flex-start', disabled: state.saving ? true : null, onclick: function () {
-          if (!date.value) { toast('Choose the visit date.', true); return; }
-          var useSync = sync.checked, reasons = REASONS.filter(function (r, i) { return boxes[i].checked; });
-          if (useSync && decision.value === 'Rejected' && !reasons.length) { toast('Pick at least one reason for the rejection.', true); return; }
-          var answers = qs.map(function (q) { return { header: q.header, value: draft('a:' + q.header, '') }; });
-          submit(k, save(addTourRow(x, { date: date.value, hoa: hoa.value.trim(), impression: impression.value.trim(), pros: pros.value.trim(), cons: cons.value.trim(),
-            decision: decision.value, decisionNotes: notes.value.trim(), answers: answers, syncStatus: useSync, reasons: reasons }), 'Tour logged'));
-        } }, 'Save tour')));
+    decision.addEventListener('change', function () { group.hidden = decision.value !== 'Rejected'; decisionNote.textContent = 'Decision: ' + decision.value; });
+    var decisionNote = h('span', { class: 'muted small' }, 'Decision: ' + decision.value + (room.id === 'overall' ? '' : ' (change it under Overall)'));
+    var overall = room.id === 'overall' ? h('div', { class: 'stack' },
+      h('div', { class: 'tfield' }, h('div', { class: 'ttitle' }, 'Decision'), decision), group,
+      h('label', { class: 'sync' }, sync, 'Also set this home\'s status in Home Listing to the Decision')) : null;
+
+    function onSave() {
+      if (!date.value) { toast('Choose the visit date.', true); return; }
+      var dec = state.drafts[k + '.decision'] || 'Toured';
+      var useSync = (state.drafts[k + '.sync'] === undefined ? '1' : state.drafts[k + '.sync']) === '1';
+      var reasons = REASONS.filter(function (r) { return state.drafts[k + '.r:' + r] === '1'; });
+      if (useSync && dec === 'Rejected' && !reasons.length) { toast('Pick at least one reason for the rejection.', true); goRoom(rooms.length - 1); return; }
+      var head = state.data.tourHead, answers = [];
+      TOUR_ROOMS.forEach(function (r) { r.fields.forEach(function (f) {
+        var header = matchHeader(head, f.h), v = header ? (state.drafts[tourFieldKey(x, header)] || '') : '';
+        if (header && v !== '') answers.push({ header: header, value: v });
+      }); });
+      var decHeader = matchHeader(head, 'Decision'); if (decHeader) answers.push({ header: decHeader, value: dec });
+      submit(k, save(addTourRow(x, { date: date.value, decision: dec, answers: answers, syncStatus: useSync, reasons: reasons }), 'Tour logged'), function () { location.hash = '#/housing'; });
+    }
+    function discard() {
+      if (!window.confirm('Discard this tour draft?')) return;
+      clearDraft(k); state.tourRoom[x.id] = null; render();
+    }
+    var saveBar = h('div', { class: 'savebar' }, decisionNote,
+      h('div', { class: 'chips', style: 'gap:8px' },
+        h('button', { class: 'btn', type: 'button', disabled: state.saving ? true : null, onclick: onSave }, 'Save tour'),
+        h('button', { class: 'btn ghost', type: 'button', onclick: discard }, 'Discard draft')));
+    return h('div', { class: 'stack' },
+      h('div', null, h('h1', null, homeName(x)), h('p', { class: 'lede' }, [x.community, x.city].filter(Boolean).join(', ') + '. Your answers are kept on this device as you go, until you save or discard.')),
+      back,
+      h('section', { class: 'card stack' },
+        h('div', { class: 'tfield' }, h('div', { class: 'ttitle' }, 'Visit date'), date),
+        h('div', { class: 'rooms', role: 'group', 'aria-label': 'Rooms' }, chips)),
+      h('section', { class: 'card stack' }, h('h2', null, room.title), body, overall,
+        h('div', { class: 'chips' },
+          idx > 0 ? h('button', { type: 'button', class: 'btn ghost small', onclick: function () { goRoom(idx - 1); } }, 'Previous: ' + rooms[idx - 1].title) : null,
+          idx < rooms.length - 1 ? h('button', { type: 'button', class: 'btn small', onclick: function () { goRoom(idx + 1); } }, 'Next: ' + rooms[idx + 1].title) : null)),
+      saveBar);
   }
   var CHANNELS = ['In Person', 'Email', 'Phone', 'Text', 'Online form'];
   var DIRECTIONS = ['Inbound', 'Outbound', 'Meeting'];
@@ -1093,7 +1222,7 @@
             c['Summary'] ? h('div', { class: 'small' }, c['Summary']) : null);
         }))) : null,
         reqChecklist(x),
-        tourForm(x),
+        tourStart(x),
         contactForm(x),
         statusEditor(x),
         h('div', { class: 'chips' }, homeLinks(x), x.url ? h('a', { class: 'btn ghost small', href: x.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open listing') : null)
@@ -1424,14 +1553,15 @@
   /* ---------- shell ---------- */
   var ROUTES = {
     overview: ['Overview', viewOverview], tasks: ['Tasks', viewTasks], decisions: ['Decisions', viewDecisions],
-    housing: ['Housing', viewHousing], compare: ['Compare homes', viewCompare], requirements: ['Requirements', viewRequirements], chronology: ['Chronology', viewChronology], journal: ['Journal', viewJournal], documents: ['Documents', viewDocuments], sheets: ['Sheets', viewSheets]
+    housing: ['Housing', viewHousing], tour: ['Log a tour', viewTour], compare: ['Compare homes', viewCompare], requirements: ['Requirements', viewRequirements], chronology: ['Chronology', viewChronology], journal: ['Journal', viewJournal], documents: ['Documents', viewDocuments], sheets: ['Sheets', viewSheets]
   };
   var NAV = ['overview', 'tasks', 'decisions', 'housing', 'requirements', 'chronology', 'journal', 'documents'];
 
   function go(r) { location.hash = '#/' + r; }
   function readRoute() {
-    var r = (location.hash || '').replace(/^#\/?/, '');
-    state.route = ROUTES[r] ? r : 'overview';
+    var parts = (location.hash || '').replace(/^#\/?/, '').split('/');
+    state.route = ROUTES[parts[0]] ? parts[0] : 'overview';
+    state.routeArg = parts[1] ? decodeURIComponent(parts[1]) : '';
   }
 
   function logo() {
