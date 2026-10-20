@@ -1,4 +1,4 @@
-/* Runway v0.18.0.
+/* Runway v0.19.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.18.0';
+  var APP_VERSION = '0.19.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var DRAFT_KEY = 'runway.tourdrafts'; // half-finished tours, kept on this device only
@@ -519,7 +519,9 @@
       'Garage': f.garage, 'Listing URL': f.url, 'Contact': f.contact, 'Tel. #': f.phone, 'Notes': f.notes, 'Logged by': who(), 'Home ID': id };
     return api(homeBase() + '/values/' + enc("'Home Listing'!A1") + ':append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS',
       { method: 'POST', body: { values: [rowFrom(head, obj)] } }).then(loadHome).then(function () {
-        state.notice = 'Added ' + id + '. To log tours or contacts for it with the Forms, add "' + id + ' ' + (f.builder + ': ' + f.model) + '" to the "Which home?" dropdown in the Tour and Contact Forms. The Log a tour and Log a contact buttons need that option too.';
+        var formsInUse = state.planData && (state.planData.links || []).some(function (l) { return /housing/i.test(l.group) && formUrl(l.url); });
+        state.notice = formsInUse ? 'Added ' + id + '. To log tours or contacts for it with the Forms, add "' + id + ' ' + (f.builder + ': ' + f.model) + '" to the "Which home?" dropdown in the Tour and Contact Forms. The Log a tour and Log a contact buttons need that option too.'
+          : 'Added ' + id + '.';
       });
   }
   function addContact(x, f) {
@@ -1250,7 +1252,8 @@
         links.length ? h('div', { class: 'chips' }, links.map(function (l) {
           return h('a', { class: 'btn small', href: formUrl(l.url), target: '_blank', rel: 'noopener noreferrer' }, l.name || 'Open form');
         }), state.sheet ? h('a', { class: 'btn ghost small', href: 'https://docs.google.com/spreadsheets/d/' + enc(state.sheet.id) + '/edit', target: '_blank', rel: 'noopener noreferrer' }, 'Open the sheet') : null)
-        : h('p', { class: 'muted' }, 'Add your Google Form links to a tab named Links in the Runway planning sheet (Name, URL, Group = Housing forms), then choose Refresh. Buttons for each form will appear here.'));
+        : null);
+      if (!links.length) quick = null;
     }
     return h('div', { class: 'stack' },
       h('div', null, h('h1', null, 'Housing'), h('p', { class: 'lede' }, 'Every home in your listing sheet, joined with tour notes and builder contacts by Home ID.')),
@@ -1326,7 +1329,7 @@
     return h('div', { class: 'stack' }, head,
       h('section', { class: 'card stack' },
         h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by where it is tracked' }, chipEls), search,
-        h('p', { class: 'muted small' }, 'Tour Notes and Home Listings: Runway or your Forms already capture it. Pre-qualify: confirm before adding a home to the pipeline. Not captured: check it yourself on each visit.')),
+        h('p', { class: 'muted small' }, 'Tour Notes and Home Listings: captured when you log a tour or add a home. Pre-qualify: confirm before adding a home to the pipeline. Not captured: check it yourself on each visit.')),
       cards, empty);
   }
 
@@ -1635,7 +1638,7 @@
     var foot = h('div', { class: 'foot' },
       'Runway v' + APP_VERSION + '. ',
       state.loadedAt ? 'Loaded ' + state.loadedAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) + '. ' : '',
-      'Changes to housing happen in the home-search sheet or its Forms. ',
+      'Housing changes are made in Runway or in the home-search sheet. ',
       h('a', { href: 'privacy.html' }, 'Privacy policy'));
     var note = state.notice ? h('div', { class: 'notice', role: 'status' }, h('span', null, state.notice),
       h('button', { class: 'btn ghost small', type: 'button', onclick: function () { state.notice = null; render(); } }, 'Dismiss')) : null;
