@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.19.0
+- Cleanup for retiring the Google Forms. The "Add or update" card on the Housing page and the per-home form buttons appear only while Form links are in the Links tab, so removing the links removes the buttons. The hint about adding Form links is gone.
+- After adding a home, the reminder to add it to the Forms' "Which home?" dropdown appears only while Form links are still in the Links tab.
+- Footer and Requirements wording no longer refer to the Forms.
+
 ## 0.18.0
 - New: Log a tour is now a full-screen page, reached from a button on each home's card. It is organized room by room: Outside and lot, Living areas, Kitchen, Laundry, mud room and garage, Primary suite, Primary bath, Utilities, package and HOA, Builder, and Overall. Tap the room you are in; each room chip shows how many answers you have given there. Previous and Next buttons walk you through.
 - Every Tour Notes question is covered (all the columns the Tour Form fills): Yes or No taps, pick-one chips, tick boxes for appliances, type-or-tap suggestions built from your past answers, notes and numbers. A question only appears if its column exists in the sheet.
