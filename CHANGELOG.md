@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.21.0
+- Removed the "Open in Google Sheets" buttons from the Sheets page and the "Open the sheet" button from the Housing page. Runway no longer links to the underlying sheets.
+
 ## 0.20.1
 - Reverted the sheet choosing to how it worked in 0.19.0 (and 0.16.1): the first screen asks for the home-search sheet, the planning sheet is chosen from the Overview or the Sheets page, and choosing the wrong file shows "That does not look like the right sheet" with a Choose sheet button.
 - The 0.20.0 two-slot "Connect your sheets" screen and automatic filing by tab names are removed. Everything else is unchanged from 0.19.0.
