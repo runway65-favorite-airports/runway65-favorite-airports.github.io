@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.20.0
+- Clearer, forgiving sheet choosing. The first screen now reads "Connect your sheets" and shows both slots, the home-search sheet and the planning sheet, each marked Connected or Not connected yet, with the tabs to look for.
+- One Choose a sheet button works for both. After you pick a file, Runway reads its tab names and puts it in the right slot, so you can choose the two files in either order, and choosing the wrong one first (for example the planning sheet where the home-search sheet was expected) is simply accepted and filed correctly.
+- A file with neither set of tabs is refused straight away, with the tabs it does have, instead of failing later with a tab error.
+- The Sheets page shows the tabs each slot expects, and the confirmation message says which slot a file went into and what is left to choose.
+
 ## 0.19.0
 - Cleanup for retiring the Google Forms. The "Add or update" card on the Housing page and the per-home form buttons appear only while Form links are in the Links tab, so removing the links removes the buttons. The hint about adding Form links is gone.
 - After adding a home, the reminder to add it to the Forms' "Which home?" dropdown appears only while Form links are still in the Links tab.
