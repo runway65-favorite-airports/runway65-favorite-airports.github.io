@@ -1,4 +1,4 @@
-/* Runway v0.20.0.
+/* Runway v0.20.1.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.20.0';
+  var APP_VERSION = '0.20.1';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var DRAFT_KEY = 'runway.tourdrafts'; // half-finished tours, kept on this device only
@@ -629,43 +629,15 @@
       render();
     }).catch(function (e) { state.error = { title: 'Sign-in did not finish', body: e.message }; render(); });
   }
-  var HOME_TABS = ['Home Listing', 'Home Tour Notes', 'Contacts Log'];
-  var PLAN_TABS_NEEDED = ['Tasks', 'Decisions'];
-  function inspectTabs(fileId) {
-    return api('https://sheets.googleapis.com/v4/spreadsheets/' + enc(fileId) + '?fields=sheets.properties.title').then(function (j) {
-      return (j.sheets || []).map(function (sh) { return sh.properties && sh.properties.title; }).filter(Boolean);
-    });
-  }
-  function classifyTabs(tabs) {
-    var has = function (t) { return tabs.indexOf(t) >= 0; };
-    if (HOME_TABS.every(has)) return 'home';
-    if (PLAN_TABS_NEEDED.every(has)) return 'plan';
-    return 'other';
-  }
-  // One button for both sheets. Runway reads the file's tabs and puts it in the right place,
-  // so choosing the files in either order, or the wrong one first, still works.
-  function chooseAny() {
-    state.error = null;
-    pickSheet('Choose a Runway sheet. You will choose two files, one at a time.').then(function (f) {
-      if (!f) return null;
-      return inspectTabs(f.id).then(function (tabs) {
-        var kind = classifyTabs(tabs);
-        if (kind === 'other') {
-          state.error = { title: 'That is not one of the two Runway sheets',
-            body: 'Runway uses two files. One has the tabs Home Listing, Home Tour Notes and Contacts Log. The other has the tabs Tasks and Decisions. The file you chose has these tabs: ' + (tabs.slice(0, 6).join(', ') || 'none') + '. Choose again.', action: 'pick' };
-          render(); return null;
-        }
-        if (kind === 'home') { state.sheet = f; state.data = null; saveStore(HOME_KEY, f); }
-        else { state.plan = f; state.planData = null; state.planRole = null; saveStore(PLAN_KEY, f); }
-        var what = kind === 'home' ? 'home-search sheet' : 'planning sheet';
-        var left = kind === 'home' ? (state.plan ? '' : ' Next, choose the planning sheet.') : (state.sheet ? '' : ' Next, choose the home-search sheet.');
-        state.notice = 'Connected "' + f.name + '" as the ' + what + '.' + left;
-        return state.sheet ? loadAll() : render();
-      });
+  function choose(title, key, setter) {
+    pickSheet(title).then(function (s) {
+      if (!s) return;
+      setter(s); saveStore(key, s);
+      return loadAll();
     }).catch(function (e) { state.error = explain(e); render(); });
   }
-  function doPick() { chooseAny(); }
-  function doPickPlan() { chooseAny(); }
+  function doPick() { choose('Choose your home-search sheet', HOME_KEY, function (s) { state.sheet = s; state.data = null; }); }
+  function doPickPlan() { choose('Choose your Runway planning sheet', PLAN_KEY, function (s) { state.plan = s; state.planData = null; state.planRole = null; }); }
   function doSignOut() {
     var t = state.token;
     state.drafts = {}; persistDrafts(); state.token = null; state.expires = 0; state.user = null; state.data = null; state.planData = null;
@@ -1574,9 +1546,9 @@
         h('div', { class: 'chips' }, h('button', { class: 'btn small', type: 'button', onclick: onChange }, file ? 'Change sheet' : 'Choose sheet'),
           file ? h('a', { class: 'btn ghost small', href: 'https://docs.google.com/spreadsheets/d/' + enc(file.id) + '/edit', target: '_blank', rel: 'noopener noreferrer' }, 'Open in Google Sheets') : null));
     }
-    return h('div', { class: 'stack' }, pageHead('Sheets', 'The two Google Sheets Runway reads. Runway can open only the files you choose here. Choosing a file puts it in the right place, whichever button you use.'),
-      row('Home-search sheet', state.sheet, doPick, state.role, h('p', { class: 'muted small' }, 'Has the tabs Home Listing, Home Tour Notes and Contacts Log.')),
-      row('Runway planning sheet', state.plan, doPickPlan, state.planRole, h('p', { class: 'muted small' }, 'Has the tabs Tasks and Decisions.')),
+    return h('div', { class: 'stack' }, pageHead('Sheets', 'The two Google Sheets Runway reads. Runway can open only the files you choose here.'),
+      row('Home-search sheet', state.sheet, doPick, state.role),
+      row('Runway planning sheet', state.plan, doPickPlan, state.planRole),
       h('section', { class: 'card stack' }, h('h2', null, 'About'),
         h('p', null, 'Runway version ' + APP_VERSION), h('p', null, h('a', { href: 'privacy.html' }, 'Privacy policy'))));
   }
@@ -1622,23 +1594,12 @@
       errorBox(),
       h('p', { class: 'muted small' }, 'Private. Invitation only. ', h('a', { href: 'privacy.html' }, 'Privacy policy'))));
   }
-  function slotCard(title, tabs, file) {
-    return h('div', { class: 'card tight stack', style: 'text-align:left;width:100%' },
-      h('div', { style: 'display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 12px;align-items:baseline' }, h('strong', null, title),
-        file ? h('span', { class: 'tag active' }, 'Connected') : h('span', { class: 'tag warn' }, 'Not connected yet')),
-      file ? h('div', { class: 'small' }, file.name || 'Chosen file') : null,
-      h('div', { class: 'muted small' }, 'The file with the tabs ' + tabs));
-  }
   function screenChoose() {
     return h('div', { class: 'center' }, h('div', { class: 'box' },
       h('div', { class: 'brand' }, logo(), 'Runway'),
-      h('h1', null, 'Connect your sheets'),
-      h('p', { class: 'muted' }, 'Runway uses two Google Sheets. Choose them one at a time, in either order. Runway checks each file and tells you if it is the wrong one.'),
-      slotCard('Home-search sheet', 'Home Listing, Home Tour Notes and Contacts Log', state.sheet),
-      slotCard('Planning sheet', 'Tasks and Decisions', state.plan),
-      state.notice ? h('p', { role: 'status' }, h('strong', null, state.notice)) : null,
-      h('button', { class: 'btn', type: 'button', onclick: chooseAny }, state.plan && !state.sheet ? 'Choose the home-search sheet' : 'Choose a sheet'),
-      h('p', { class: 'muted small' }, 'In the file list, look in the Shared with me tab. If you cannot find a file, ask the person who shared them.'),
+      h('h1', null, 'Choose your sheet'),
+      h('p', { class: 'muted' }, 'Pick your home-search sheet once. Runway remembers the choice on this device and can open only the files you choose.'),
+      h('button', { class: 'btn', type: 'button', onclick: doPick }, 'Choose sheet'),
       errorBox(),
       h('button', { class: 'btn ghost small', type: 'button', onclick: doSignOut }, 'Sign out')));
   }

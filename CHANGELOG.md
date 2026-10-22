@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.20.1
+- Reverted the sheet choosing to how it worked in 0.19.0 (and 0.16.1): the first screen asks for the home-search sheet, the planning sheet is chosen from the Overview or the Sheets page, and choosing the wrong file shows "That does not look like the right sheet" with a Choose sheet button.
+- The 0.20.0 two-slot "Connect your sheets" screen and automatic filing by tab names are removed. Everything else is unchanged from 0.19.0.
+
 ## 0.20.0
 - Clearer, forgiving sheet choosing. The first screen now reads "Connect your sheets" and shows both slots, the home-search sheet and the planning sheet, each marked Connected or Not connected yet, with the tabs to look for.
 - One Choose a sheet button works for both. After you pick a file, Runway reads its tab names and puts it in the right slot, so you can choose the two files in either order, and choosing the wrong one first (for example the planning sheet where the home-search sheet was expected) is simply accepted and filed correctly.
