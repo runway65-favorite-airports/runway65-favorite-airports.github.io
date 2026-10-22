@@ -1,4 +1,4 @@
-/* Runway v0.20.1.
+/* Runway v0.21.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.20.1';
+  var APP_VERSION = '0.21.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var DRAFT_KEY = 'runway.tourdrafts'; // half-finished tours, kept on this device only
@@ -1251,7 +1251,7 @@
       quick = h('section', { class: 'card stack' }, h('h2', null, 'Add or update'),
         links.length ? h('div', { class: 'chips' }, links.map(function (l) {
           return h('a', { class: 'btn small', href: formUrl(l.url), target: '_blank', rel: 'noopener noreferrer' }, l.name || 'Open form');
-        }), state.sheet ? h('a', { class: 'btn ghost small', href: 'https://docs.google.com/spreadsheets/d/' + enc(state.sheet.id) + '/edit', target: '_blank', rel: 'noopener noreferrer' }, 'Open the sheet') : null)
+        }))
         : null);
       if (!links.length) quick = null;
     }
@@ -1543,8 +1543,7 @@
       return h('section', { class: 'card stack' }, h('h2', null, title),
         file ? h('p', null, h('strong', null, file.name || 'Chosen sheet'), role ? h('span', { class: 'tag', style: 'margin-left:8px' }, role === 'editor' ? 'You can edit' : role === 'viewer' ? 'View only' : 'Role unknown') : null) : h('p', { class: 'muted' }, 'Not connected.'),
         extra || null,
-        h('div', { class: 'chips' }, h('button', { class: 'btn small', type: 'button', onclick: onChange }, file ? 'Change sheet' : 'Choose sheet'),
-          file ? h('a', { class: 'btn ghost small', href: 'https://docs.google.com/spreadsheets/d/' + enc(file.id) + '/edit', target: '_blank', rel: 'noopener noreferrer' }, 'Open in Google Sheets') : null));
+        h('div', { class: 'chips' }, h('button', { class: 'btn small', type: 'button', onclick: onChange }, file ? 'Change sheet' : 'Choose sheet')));
     }
     return h('div', { class: 'stack' }, pageHead('Sheets', 'The two Google Sheets Runway reads. Runway can open only the files you choose here.'),
       row('Home-search sheet', state.sheet, doPick, state.role),
