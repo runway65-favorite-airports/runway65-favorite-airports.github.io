@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.23.0
+- New: planned tours. On each home's card, people with edit access can plan a tour with a date, an optional time and a note. Plans are saved in an optional Tour Plans tab in the home-search sheet (headers: Home ID, Planned date, Time, Note, Status, Planned by, Planned on).
+- A planned tour shows as a "Tour planned" tag on the home's card, as an Upcoming tours card on the Overview (with a note about plans whose date has passed and were never logged), and as a Planned event in the Chronology. Everyone, including Viewers, sees them.
+- Add to Google Calendar opens Google Calendar with the tour's title, time, address and builder contact filled in; Download .ics creates a calendar file for Apple Calendar or Outlook. Runway does not connect to your calendar.
+- Logging a tour for the same date closes its plan automatically. A plan can also be cancelled.
+- Fixed: since 0.14.0 the screen was not redrawn after a quick change (a status change, a requirement check, a task check-off, cancelling a plan). The change was always saved correctly, but the page stayed stale until the next refresh. It now redraws straight after saving.
+- The privacy policy describes the calendar buttons.
+
 ## 0.22.0
 - The status filter chips on the Housing page now show how many homes are in each status, for example All (15), Active (6), Rejected (7), the same counts as the Overview.
 - Each home's card shows the date it was added, taken from the Timestamp column of the Home Listing tab (for example "Added 10/24/2026"). A home with no timestamp shows nothing.
