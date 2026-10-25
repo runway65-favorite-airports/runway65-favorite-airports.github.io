@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.23.2
+- Fixed: a time entered on a planned tour could be lost without any message (the Time cell stayed empty and the calendar event came out all day). The time is now picked from a list of half-hour times (7:00 AM to 7:30 PM, or "No set time"), so it can never be left half-filled. A time Runway cannot read is refused with a message, and the confirmation says exactly what was saved, for example "Tour planned for 10/30/2026 at 1:00 PM" or "(no time set, so the calendar event will be all day)".
+
+## 0.23.1
+- Fixed: a planned tour with a time was added to the calendar as an all-day event. Google Sheets returns a saved time with seconds ("1:00:00 PM"), which Runway did not recognize. Runway now reads times with or without seconds, and in 24-hour form, and shows them as "1:00 PM".
+
 ## 0.23.0
 - New: planned tours. On each home's card, people with edit access can plan a tour with a date, an optional time and a note. Plans are saved in an optional Tour Plans tab in the home-search sheet (headers: Home ID, Planned date, Time, Note, Status, Planned by, Planned on).
 - A planned tour shows as a "Tour planned" tag on the home's card, as an Upcoming tours card on the Overview (with a note about plans whose date has passed and were never logged), and as a Planned event in the Chronology. Everyone, including Viewers, sees them.

@@ -1,4 +1,4 @@
-/* Runway v0.23.0.
+/* Runway v0.23.2.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.23.0';
+  var APP_VERSION = '0.23.2';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var DRAFT_KEY = 'runway.tourdrafts'; // half-finished tours, kept on this device only
@@ -222,18 +222,29 @@
     });
     return out;
   }
+  // Sheets hands a time back as "1:00:00 PM" (seconds) or, in some locales, "13:00:00". Accept all of them.
+  function parseClock(t) {
+    var m = String(t || '').trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?$/i);
+    if (!m) return null;
+    var hh = +m[1], mm = +m[2];
+    if (m[3]) { if (hh < 1 || hh > 12) return null; hh = (hh % 12) + (/pm/i.test(m[3]) ? 12 : 0); }
+    else if (hh > 23) return null;
+    return mm > 59 ? null : { h: hh, m: mm };
+  }
+  function clockText(t) {
+    var c = parseClock(t);
+    return c ? ((c.h % 12) || 12) + ':' + pad(c.m, 2) + ' ' + (c.h >= 12 ? 'PM' : 'AM') : String(t || '');
+  }
   function planStart(p) {
     if (!p.date) return null;
-    var d = new Date(p.date.getTime()), m = String(p.time || '').match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-    if (m) { d.setHours((+m[1] % 12) + (/pm/i.test(m[3]) ? 12 : 0), +m[2], 0, 0); return { start: d, timed: true }; }
+    var d = new Date(p.date.getTime()), c = parseClock(p.time);
+    if (c) { d.setHours(c.h, c.m, 0, 0); return { start: d, timed: true }; }
     return { start: d, timed: false };
   }
-  function planWhen(p) { return p.dateText + (p.time ? ' at ' + p.time : ''); }
+  function planWhen(p) { return p.dateText + (p.time ? ' at ' + clockText(p.time) : ''); }
   function timeFromInput(v) {
-    var m = String(v || '').match(/^(\d{1,2}):(\d{2})$/);
-    if (!m) return '';
-    var hh = +m[1];
-    return ((hh % 12) || 12) + ':' + m[2] + ' ' + (hh >= 12 ? 'PM' : 'AM');
+    var c = parseClock(v);
+    return c ? ((c.h % 12) || 12) + ':' + pad(c.m, 2) + ' ' + (c.h >= 12 ? 'PM' : 'AM') : '';
   }
   function ymd(d) { return d.getFullYear() + pad(d.getMonth() + 1, 2) + pad(d.getDate(), 2); }
   function ymdhms(d) { return ymd(d) + 'T' + pad(d.getHours(), 2) + pad(d.getMinutes(), 2) + '00'; }
@@ -1223,15 +1234,24 @@
     var k = 'plan-' + x.id;
     var date = keep(k, 'date', h('input', { type: 'date' }));
     var d0 = new Date(); date.min = d0.getFullYear() + '-' + pad(d0.getMonth() + 1, 2) + '-' + pad(d0.getDate(), 2);
-    var time = keep(k, 'time', h('input', { type: 'time' }));
+    var slots = [h('option', { value: '' }, 'No set time (all-day event)')];
+    for (var mins = 7 * 60; mins <= 19 * 60 + 30; mins += 30) {
+      var label = ((Math.floor(mins / 60) % 12) || 12) + ':' + pad(mins % 60, 2) + ' ' + (mins >= 12 * 60 ? 'PM' : 'AM');
+      slots.push(h('option', { value: label }, label));
+    }
+    var time = keep(k, 'time', h('select', null, slots));
     var note = keep(k, 'note', h('input', { type: 'text', maxlength: '200', placeholder: 'For example: meet the sales agent at the model home' }));
     return h('details', formAttrs(k, false, 'subform'), h('summary', null, 'Plan a tour'),
       h('div', { class: 'stack', style: 'margin-top:12px' },
-        field('Date', date), field('Time (optional)', time), field('Note (optional)', note),
+        field('Date', date), field('Time', time), field('Note (optional)', note),
         h('button', { class: 'btn small', type: 'button', style: 'align-self:flex-start', disabled: state.saving ? true : null, onclick: function () {
           if (!date.value) { toast('Choose the date.', true); return; }
           if (date.value < date.min) { toast('Choose today or a later date.', true); return; }
-          submit(k, save(addPlan(x, { date: date.value, time: timeFromInput(time.value), note: note.value.trim() }), 'Tour planned'));
+          var raw = String(time.value || '').trim(), t = timeFromInput(raw);
+          if (!raw && time.validity && time.validity.badInput) { toast('The time is incomplete. Pick the hour, the minutes and AM or PM, or clear the time.', true); return; }
+          if (raw && !t) { toast('Runway could not read that time. Try something like 1:00 PM.', true); return; }
+          var when = isoToUs(date.value) + (t ? ' at ' + t : ' (no time set, so the calendar event will be all day)');
+          submit(k, save(addPlan(x, { date: date.value, time: t, note: note.value.trim() }), 'Tour planned for ' + when));
         } }, 'Save plan')));
   }
   function planSection(x) {
@@ -1611,7 +1631,7 @@
     d.plans.list.forEach(function (p) {
       if (p.status !== 'Planned' || !p.date) return;
       var late = p.date < startOfToday();
-      ev.push({ date: p.date, tag: 'Planned', title: (late ? 'Planned tour, not yet logged: ' : 'Planned tour: ') + (names[p.id] || p.id), detail: [p.time ? 'At ' + p.time : '', p.note].filter(Boolean).join('. ') });
+      ev.push({ date: p.date, tag: 'Planned', title: (late ? 'Planned tour, not yet logged: ' : 'Planned tour: ') + (names[p.id] || p.id), detail: [p.time ? 'At ' + clockText(p.time) : '', p.note].filter(Boolean).join('. ') });
     });
     var target = new Date(C.TARGET_DATE + 'T00:00:00');
     ev.push({ date: target, tag: 'Milestone', title: 'Target date', detail: '' });
