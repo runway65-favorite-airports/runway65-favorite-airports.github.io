@@ -1,4 +1,4 @@
-/* Runway v0.23.2.
+/* Runway v0.24.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.23.2';
+  var APP_VERSION = '0.24.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var DRAFT_KEY = 'runway.tourdrafts'; // half-finished tours, kept on this device only
@@ -1285,6 +1285,13 @@
       })) : h('p', { class: 'muted' }, 'Nothing planned.'),
       late.length ? h('p', { class: 'small' }, 'Planned but not yet logged: ' + late.map(function (p) { return homeName(homes[p.id]) + ' (' + p.dateText + ')'; }).join(', ')) : null);
   }
+  // Closes every open home card and the sections inside them.
+  function collapseAllHomes() {
+    state.openHomes = {}; state.openReq = {};
+    Object.keys(state.openForms).forEach(function (k) { if (/^(contact|plan)-/.test(k)) delete state.openForms[k]; });
+    render();
+    try { window.scrollTo(0, 0); } catch (e) { /* ignore */ }
+  }
   function reqSummary(x) {
     var P = state.planData; if (!P || !P.requirements.length) return null;
     var yes = 0, no = 0, unk = 0, mustFail = false;
@@ -1416,7 +1423,7 @@
       quick, canEditHome() ? addHomeForm() : null,
       h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by status' }, statuses.map(function (s) {
         return h('button', { class: 'chip', type: 'button', 'aria-pressed': String(state.filter === s), onclick: function () { state.filter = s; render(); } }, s + ' (' + (s === 'All' ? homes.length : homes.filter(function (x) { return x.status === s; }).length) + ')');
-      })),
+      }).concat([h('button', { class: 'btn ghost small', type: 'button', onclick: collapseAllHomes }, 'Collapse all')])),
       shown.length ? h('div', { class: 'homes' }, shown.map(homeCard)) : h('p', { class: 'muted' }, 'No homes match this filter.')
     );
   }

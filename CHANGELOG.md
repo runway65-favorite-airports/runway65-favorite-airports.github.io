@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.24.0
+- Each home card header has an arrow that points down when the card is closed and up when it is open, so it is clear the header can be tapped to open or close it.
+- A Collapse all button next to the status filters on the Housing page closes every open home card, and the sections inside them, and returns to the top of the list.
+
 ## 0.23.2
 - Fixed: a time entered on a planned tour could be lost without any message (the Time cell stayed empty and the calendar event came out all day). The time is now picked from a list of half-hour times (7:00 AM to 7:30 PM, or "No set time"), so it can never be left half-filled. A time Runway cannot read is refused with a message, and the confirmation says exactly what was saved, for example "Tour planned for 10/30/2026 at 1:00 PM" or "(no time set, so the calendar event will be all day)".
 
