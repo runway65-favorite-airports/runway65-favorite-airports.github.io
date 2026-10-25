@@ -187,3 +187,8 @@ details>summary{cursor:pointer;font-weight:600;color:var(--teal);min-height:44px
 .tfield:first-child{border-top:0;padding-top:0}
 .tfield input[type=text],.tfield input[type=date],.tfield textarea,.tfield select{font:inherit;font-size:16px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-height:44px;width:100%}
 .savebar{position:sticky;bottom:0;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between;z-index:5;box-shadow:0 -4px 16px rgba(0,0,0,.12)}
+
+/* v0.24.0: arrow on each home card header */
+details.home>summary{position:relative;padding-right:52px}
+details.home>summary::after{content:"";position:absolute;right:22px;top:24px;width:10px;height:10px;border-right:2px solid var(--teal);border-bottom:2px solid var(--teal);transform:rotate(45deg);transition:transform .15s}
+details.home[open]>summary::after{top:28px;transform:rotate(-135deg)}
