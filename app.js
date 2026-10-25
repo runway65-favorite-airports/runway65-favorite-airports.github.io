@@ -1,4 +1,4 @@
-/* Runway v0.22.0.
+/* Runway v0.23.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.22.0';
+  var APP_VERSION = '0.23.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var DRAFT_KEY = 'runway.tourdrafts'; // half-finished tours, kept on this device only
@@ -210,6 +210,67 @@
   }
 
   /* ---------- data ---------- */
+  function buildPlans(rows) {
+    var out = { has: false, head: [], list: [] };
+    if (!rows) return out;
+    out.head = rows.head || []; out.has = out.head.length > 0;
+    rows.forEach(function (r) {
+      if (!r['Home ID']) return;
+      var st = String(r['Status'] || '').trim().toLowerCase();
+      out.list.push({ row: r._row, id: r['Home ID'], date: parseDate(r['Planned date']), dateText: r['Planned date'] || '', time: String(r['Time'] || '').trim(),
+        note: r['Note'] || '', status: st === 'done' ? 'Done' : (st === 'cancelled' || st === 'canceled') ? 'Cancelled' : 'Planned', by: r['Planned by'] || '' });
+    });
+    return out;
+  }
+  function planStart(p) {
+    if (!p.date) return null;
+    var d = new Date(p.date.getTime()), m = String(p.time || '').match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+    if (m) { d.setHours((+m[1] % 12) + (/pm/i.test(m[3]) ? 12 : 0), +m[2], 0, 0); return { start: d, timed: true }; }
+    return { start: d, timed: false };
+  }
+  function planWhen(p) { return p.dateText + (p.time ? ' at ' + p.time : ''); }
+  function timeFromInput(v) {
+    var m = String(v || '').match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return '';
+    var hh = +m[1];
+    return ((hh % 12) || 12) + ':' + m[2] + ' ' + (hh >= 12 ? 'PM' : 'AM');
+  }
+  function ymd(d) { return d.getFullYear() + pad(d.getMonth() + 1, 2) + pad(d.getDate(), 2); }
+  function ymdhms(d) { return ymd(d) + 'T' + pad(d.getHours(), 2) + pad(d.getMinutes(), 2) + '00'; }
+  function tourSlot(ps) {
+    if (ps.timed) return { a: ymdhms(ps.start), b: ymdhms(new Date(ps.start.getTime() + 60 * 60000)), allDay: false };
+    var next = new Date(ps.start.getTime()); next.setDate(next.getDate() + 1);
+    return { a: ymd(ps.start), b: ymd(next), allDay: true };
+  }
+  function tourDetails(x, p) {
+    return [[x.contact, x.phone].filter(Boolean).length ? 'Builder contact: ' + [x.contact, x.phone].filter(Boolean).join(', ') : '', p.note].filter(Boolean).join('\n');
+  }
+  function calendarLink(x, p) {
+    var ps = planStart(p); if (!ps) return null;
+    var slot = tourSlot(ps), loc = x.address || [x.community, x.city].filter(Boolean).join(', ');
+    return 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=' + enc('Tour: ' + homeName(x)) + '&dates=' + slot.a + '/' + slot.b +
+      '&details=' + enc(tourDetails(x, p)) + '&location=' + enc(loc);
+  }
+  function icsText(t) { return String(t).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n'); }
+  function downloadIcs(x, p) {
+    var ps = planStart(p); if (!ps) return;
+    var slot = tourSlot(ps), loc = x.address || [x.community, x.city].filter(Boolean).join(', ');
+    var lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Runway//Tour//EN', 'BEGIN:VEVENT', 'UID:tour-' + x.id + '-' + slot.a + '@runway',
+      'DTSTAMP:' + ymdhms(new Date()), slot.allDay ? 'DTSTART;VALUE=DATE:' + slot.a : 'DTSTART:' + slot.a, slot.allDay ? 'DTEND;VALUE=DATE:' + slot.b : 'DTEND:' + slot.b,
+      'SUMMARY:' + icsText('Tour: ' + homeName(x)), 'LOCATION:' + icsText(loc), 'DESCRIPTION:' + icsText(tourDetails(x, p)), 'END:VEVENT', 'END:VCALENDAR'];
+    try {
+      var url = URL.createObjectURL(new Blob([lines.join('\r\n')], { type: 'text/calendar' }));
+      var a = document.createElement('a'); a.href = url; a.download = 'tour-' + x.id + '.ics';
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+    } catch (e) { toast('Could not create the calendar file on this device.', true); }
+  }
+  function plannedFor(id) {
+    return state.data.plans.list.filter(function (p) { return p.id === id && p.status === 'Planned'; }).sort(function (a, b) { return (a.date ? a.date.getTime() : 0) - (b.date ? b.date.getTime() : 0); });
+  }
+  function nextPlan(id) {
+    var today = startOfToday(), up = plannedFor(id).filter(function (p) { return p.date && p.date >= today; });
+    return up[0] || null;
+  }
   function buildChecks(rows) {
     var out = { has: false, head: [], map: {} };
     if (!rows) return out;
@@ -319,9 +380,14 @@
             .then(function (c) { by.checks = table(c.values); })
             .catch(function () { by.checks = null; });
         })
+        .then(function () {
+          return api('https://sheets.googleapis.com/v4/spreadsheets/' + id + '/values/' + enc("'Tour Plans'") + '?valueRenderOption=FORMATTED_VALUE')
+            .then(function (c) { by.plans = table(c.values); })
+            .catch(function () { by.plans = null; });
+        })
         .then(function () { return by; });
     }).then(function (by) {
-      state.data = { homes: buildHomes(by), tours: by.tours || [], contacts: by.contacts || [], docs: by.docs, listingHead: (by.listing && by.listing.head) || [], docsHead: (by.docs && by.docs.head) || [], listingRows: by.listing || [], tourHead: (by.tours && by.tours.head) || [], checks: buildChecks(by.checks), contactsHead: (by.contacts && by.contacts.head) || [] };
+      state.data = { homes: buildHomes(by), tours: by.tours || [], contacts: by.contacts || [], docs: by.docs, listingHead: (by.listing && by.listing.head) || [], docsHead: (by.docs && by.docs.head) || [], listingRows: by.listing || [], tourHead: (by.tours && by.tours.head) || [], checks: buildChecks(by.checks), plans: buildPlans(by.plans), contactsHead: (by.contacts && by.contacts.head) || [] };
     });
   }
 
@@ -544,9 +610,13 @@
     f.answers.forEach(function (a) { if (a.value) obj[a.header] = a.value; });
     return api(homeBase() + '/values/' + enc("'Home Tour Notes'!A1") + ':append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS',
       { method: 'POST', body: { values: [rowLoose(head, obj)] } }).then(loadHome).then(function () {
-        if (!f.syncStatus) return null;
-        var fresh = state.data.homes.filter(function (hm) { return hm.id === x.id; })[0];
-        return fresh ? setHomeStatus(fresh, f.decision, f.reasons, false) : null;
+        var done = state.data.plans.list.filter(function (p) { return p.id === x.id && p.status === 'Planned' && p.dateText === date; });
+        var closePlans = done.reduce(function (chain, p) { return chain.then(function () { return setPlanStatus(p, 'Done'); }).catch(function () { return null; }); }, Promise.resolve());
+        return closePlans.then(function () {
+          if (!f.syncStatus) return null;
+          var fresh = state.data.homes.filter(function (hm) { return hm.id === x.id; })[0];
+          return fresh ? setHomeStatus(fresh, f.decision, f.reasons, false) : null;
+        });
       });
   }
   function driveIdFrom(url) {
@@ -559,6 +629,23 @@
       'Sensitivity': f.sensitivity, 'Added by': who(), 'Added on': todayText(), 'Review date': isoToUs(f.review) };
     return api(homeBase() + '/values/' + enc("'Documents & Links'!A1") + ':append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS',
       { method: 'POST', body: { values: [rowFrom(head, obj)] } }).then(loadHome);
+  }
+  function addPlan(x, f) {
+    var plans = state.data.plans, head = plans.head;
+    if (!plans.has) return Promise.reject(new Error('Add a Tour Plans tab to the home-search sheet to save planned tours.'));
+    var date = isoToUs(f.date);
+    if (plannedFor(x.id).some(function (p) { return p.dateText === date; })) return Promise.reject(new Error('A tour is already planned for this home on that date.'));
+    var obj = { 'Home ID': x.id, 'Planned date': date, 'Time': f.time, 'Note': f.note, 'Status': 'Planned', 'Planned by': who(), 'Planned on': todayText() };
+    return api(homeBase() + '/values/' + enc("'Tour Plans'!A1") + ':append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS',
+      { method: 'POST', body: { values: [rowLoose(head, obj)] } }).then(loadHome);
+  }
+  function setPlanStatus(p, status) {
+    var head = state.data.plans.head, iS = head.indexOf('Status'), iH = head.indexOf('Home ID');
+    if (iS < 0 || iH < 0) return Promise.reject(new Error('The Tour Plans tab needs Home ID and Status columns.'));
+    return guardCell('Tour Plans', iH, p.row, p.id).then(function () {
+      return api(homeBase() + '/values:batchUpdate', { method: 'POST', body: { valueInputOption: 'USER_ENTERED',
+        data: [{ range: "'Tour Plans'!" + colLetter(iS) + p.row, values: [[status]] }] } });
+    }).then(function () { p.status = status; });
   }
   function addJournal(f) {
     var P = state.planData;
@@ -611,7 +698,7 @@
   }
   function save(promise, okText) {
     state.saving = true; render();
-    return promise.then(function () { state.saving = false; toast(okText); return true; })
+    return promise.then(function () { state.saving = false; toast(okText); render(); return true; })
       .catch(function (e) {
         state.saving = false;
         var msg = e && e.message ? e.message : 'Could not save.';
@@ -740,6 +827,7 @@
           homes.length ? null : h('p', { class: 'muted' }, 'No homes with a Home ID yet. Add IDs in the Home Listing tab.'),
           h('a', { class: 'btn ghost small', href: '#/housing', style: 'align-self:flex-start' }, 'See all homes'))),
       plan,
+      upcomingToursCard(),
       h('div', { class: 'row' },
         h('section', { class: 'card col stack' },
           h('h2', null, 'Active candidates'),
@@ -1131,6 +1219,52 @@
             summary: summary.value.trim(), link: link.value.trim(), action: action.value, actionNotes: '', next: next.value.trim(), due: due.value }), 'Contact logged'));
         } }, 'Save contact')));
   }
+  function planForm(x) {
+    var k = 'plan-' + x.id;
+    var date = keep(k, 'date', h('input', { type: 'date' }));
+    var d0 = new Date(); date.min = d0.getFullYear() + '-' + pad(d0.getMonth() + 1, 2) + '-' + pad(d0.getDate(), 2);
+    var time = keep(k, 'time', h('input', { type: 'time' }));
+    var note = keep(k, 'note', h('input', { type: 'text', maxlength: '200', placeholder: 'For example: meet the sales agent at the model home' }));
+    return h('details', formAttrs(k, false, 'subform'), h('summary', null, 'Plan a tour'),
+      h('div', { class: 'stack', style: 'margin-top:12px' },
+        field('Date', date), field('Time (optional)', time), field('Note (optional)', note),
+        h('button', { class: 'btn small', type: 'button', style: 'align-self:flex-start', disabled: state.saving ? true : null, onclick: function () {
+          if (!date.value) { toast('Choose the date.', true); return; }
+          if (date.value < date.min) { toast('Choose today or a later date.', true); return; }
+          submit(k, save(addPlan(x, { date: date.value, time: timeFromInput(time.value), note: note.value.trim() }), 'Tour planned'));
+        } }, 'Save plan')));
+  }
+  function planSection(x) {
+    var P = state.data.plans, list = plannedFor(x.id);
+    var form = canEditHome() ? (P.has ? planForm(x) : h('p', { class: 'muted small' }, 'To plan tours, add a tab named "Tour Plans" to the home-search sheet with the headers: Home ID, Planned date, Time, Note, Status, Planned by, Planned on.')) : null;
+    if (!list.length && !form) return null;
+    return h('div', { class: 'stack' },
+      list.length ? h('ul', { class: 'tasks' }, list.map(function (p) {
+        var link = calendarLink(x, p), past = p.date && p.date < startOfToday();
+        return h('li', { class: 'req' },
+          h('div', { class: 'tbody' }, h('div', { class: 'ttitle' }, (past ? 'Tour was planned for ' : 'Tour planned: ') + planWhen(p)),
+            past ? h('div', { class: 'small' }, 'Log the tour to close this plan.') : null, p.note ? h('div', { class: 'muted small' }, p.note) : null),
+          h('div', { class: 'chips', style: 'gap:6px' },
+            link ? h('a', { class: 'btn small', href: link, target: '_blank', rel: 'noopener noreferrer' }, 'Add to Google Calendar') : null,
+            h('button', { class: 'btn ghost small', type: 'button', onclick: function () { downloadIcs(x, p); } }, 'Download .ics'),
+            canEditHome() ? h('button', { class: 'btn ghost small', type: 'button', disabled: state.saving ? true : null, onclick: function () { save(setPlanStatus(p, 'Cancelled'), 'Plan cancelled'); } }, 'Cancel plan') : null));
+      })) : null, form);
+  }
+  function upcomingToursCard() {
+    var d = state.data, today = startOfToday(), homes = {};
+    d.homes.forEach(function (x) { homes[x.id] = x; });
+    var all = d.plans.list.filter(function (p) { return p.status === 'Planned' && p.date && homes[p.id]; }).sort(function (a, b) { return a.date - b.date; });
+    var up = all.filter(function (p) { return p.date >= today; }).slice(0, 5), late = all.filter(function (p) { return p.date < today; });
+    if (!up.length && !late.length) return null;
+    return h('section', { class: 'card stack' }, h('h2', null, 'Upcoming tours'),
+      up.length ? h('ul', { class: 'list' }, up.map(function (p) {
+        var x = homes[p.id], link = calendarLink(x, p);
+        return h('li', null, h('strong', null, planWhen(p)), h('div', null, homeName(x)),
+          p.note ? h('div', { class: 'muted small' }, p.note) : null,
+          link ? h('a', { href: link, target: '_blank', rel: 'noopener noreferrer', class: 'small' }, 'Add to Google Calendar') : null);
+      })) : h('p', { class: 'muted' }, 'Nothing planned.'),
+      late.length ? h('p', { class: 'small' }, 'Planned but not yet logged: ' + late.map(function (p) { return homeName(homes[p.id]) + ' (' + p.dateText + ')'; }).join(', ')) : null);
+  }
   function reqSummary(x) {
     var P = state.planData; if (!P || !P.requirements.length) return null;
     var yes = 0, no = 0, unk = 0, mustFail = false;
@@ -1206,7 +1340,7 @@
       h('summary', null,
         h('div', { class: 'head' }, h('h3', null, homeName(x)), h('strong', null, money(x.price))),
         h('div', { class: 'muted small' }, [x.community, x.city].filter(Boolean).join(', ')),
-        h('div', { class: 'chips' }, tagFor(x.status), x.added ? h('span', { class: 'tag' }, 'Added ' + x.added) : null, (function () { var m = reqSummary(x); return m ? h('span', { class: 'tag' + (m.mustFail ? ' warn' : '') }, m.yes + ' of ' + m.total + ' requirements met' + (m.no ? ', ' + m.no + ' not met' : '')) : null; })(), x.reason ? h('span', { class: 'tag' }, x.reason) : null, x.visit ? h('span', { class: 'tag' }, 'Toured ' + x.visit) : null)
+        h('div', { class: 'chips' }, tagFor(x.status), x.added ? h('span', { class: 'tag' }, 'Added ' + x.added) : null, (function () { var np = nextPlan(x.id); return np ? h('span', { class: 'tag warn' }, 'Tour planned ' + planWhen(np)) : null; })(), (function () { var m = reqSummary(x); return m ? h('span', { class: 'tag' + (m.mustFail ? ' warn' : '') }, m.yes + ' of ' + m.total + ' requirements met' + (m.no ? ', ' + m.no + ' not met' : '')) : null; })(), x.reason ? h('span', { class: 'tag' }, x.reason) : null, x.visit ? h('span', { class: 'tag' }, 'Toured ' + x.visit) : null)
       ),
       h('div', { class: 'body' },
         h('dl', { class: 'kv' },
@@ -1224,6 +1358,7 @@
             c['Summary'] ? h('div', { class: 'small' }, c['Summary']) : null);
         }))) : null,
         reqChecklist(x),
+        planSection(x),
         tourStart(x),
         contactForm(x),
         statusEditor(x),
@@ -1473,6 +1608,11 @@
         if (dt) ev.push({ date: dt, tag: 'Decision', title: 'Decided: ' + x.title, detail: x.reasoning });
       });
     }
+    d.plans.list.forEach(function (p) {
+      if (p.status !== 'Planned' || !p.date) return;
+      var late = p.date < startOfToday();
+      ev.push({ date: p.date, tag: 'Planned', title: (late ? 'Planned tour, not yet logged: ' : 'Planned tour: ') + (names[p.id] || p.id), detail: [p.time ? 'At ' + p.time : '', p.note].filter(Boolean).join('. ') });
+    });
     var target = new Date(C.TARGET_DATE + 'T00:00:00');
     ev.push({ date: target, tag: 'Milestone', title: 'Target date', detail: '' });
     ev.sort(function (a, b) { return a.date - b.date; });
