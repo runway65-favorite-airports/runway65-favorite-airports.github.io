@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.22.0
+- The status filter chips on the Housing page now show how many homes are in each status, for example All (15), Active (6), Rejected (7), the same counts as the Overview.
+- Each home's card shows the date it was added, taken from the Timestamp column of the Home Listing tab (for example "Added 10/24/2026"). A home with no timestamp shows nothing.
+
 ## 0.21.0
 - Removed the "Open in Google Sheets" buttons from the Sheets page and the "Open the sheet" button from the Housing page. Runway no longer links to the underlying sheets.
 

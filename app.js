@@ -1,4 +1,4 @@
-/* Runway v0.21.0.
+/* Runway v0.22.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.21.0';
+  var APP_VERSION = '0.22.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var DRAFT_KEY = 'runway.tourdrafts'; // half-finished tours, kept on this device only
@@ -251,7 +251,7 @@
     return t.listing.filter(function (r) { return r['Home ID']; }).map(function (r) {
       var id = r['Home ID'];
       return {
-        id: id, row: r._row, beds: r['Bedrooms'] || '', baths: r['Baths'] || '', garage: r['Garage'] || '', builder: r['Builder'] || '', model: r['Model'] || '', community: r['Community'] || '', city: r['City'] || '',
+        id: id, row: r._row, added: String(r['Timestamp'] || '').trim().split(' ')[0], beds: r['Bedrooms'] || '', baths: r['Baths'] || '', garage: r['Garage'] || '', builder: r['Builder'] || '', model: r['Model'] || '', community: r['Community'] || '', city: r['City'] || '',
         status: canonStatus(r['Status']), price: num(r['List Price']), upgrade: num(r['Upgrade Price']), sqft: num(r['Sq Ft']),
         visit: r['Visit Date'] || '', reason: r['Rejected Reason'] || '', url: r['Listing URL'] || '', address: r['Address'] || '',
         notes: r['Notes'] || '', contact: r['Contact'] || '', phone: r['Tel. #'] || '',
@@ -1206,7 +1206,7 @@
       h('summary', null,
         h('div', { class: 'head' }, h('h3', null, homeName(x)), h('strong', null, money(x.price))),
         h('div', { class: 'muted small' }, [x.community, x.city].filter(Boolean).join(', ')),
-        h('div', { class: 'chips' }, tagFor(x.status), (function () { var m = reqSummary(x); return m ? h('span', { class: 'tag' + (m.mustFail ? ' warn' : '') }, m.yes + ' of ' + m.total + ' requirements met' + (m.no ? ', ' + m.no + ' not met' : '')) : null; })(), x.reason ? h('span', { class: 'tag' }, x.reason) : null, x.visit ? h('span', { class: 'tag' }, 'Toured ' + x.visit) : null)
+        h('div', { class: 'chips' }, tagFor(x.status), x.added ? h('span', { class: 'tag' }, 'Added ' + x.added) : null, (function () { var m = reqSummary(x); return m ? h('span', { class: 'tag' + (m.mustFail ? ' warn' : '') }, m.yes + ' of ' + m.total + ' requirements met' + (m.no ? ', ' + m.no + ' not met' : '')) : null; })(), x.reason ? h('span', { class: 'tag' }, x.reason) : null, x.visit ? h('span', { class: 'tag' }, 'Toured ' + x.visit) : null)
       ),
       h('div', { class: 'body' },
         h('dl', { class: 'kv' },
@@ -1260,7 +1260,7 @@
       h('div', { class: 'chips' }, h('a', { class: 'btn small', href: '#/compare' }, 'Compare homes side by side')),
       quick, canEditHome() ? addHomeForm() : null,
       h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by status' }, statuses.map(function (s) {
-        return h('button', { class: 'chip', type: 'button', 'aria-pressed': String(state.filter === s), onclick: function () { state.filter = s; render(); } }, s);
+        return h('button', { class: 'chip', type: 'button', 'aria-pressed': String(state.filter === s), onclick: function () { state.filter = s; render(); } }, s + ' (' + (s === 'All' ? homes.length : homes.filter(function (x) { return x.status === s; }).length) + ')');
       })),
       shown.length ? h('div', { class: 'homes' }, shown.map(homeCard)) : h('p', { class: 'muted' }, 'No homes match this filter.')
     );
