@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.25.0
+- Housing: new Builder and City filters (drop-down lists) and a tour filter (Toured, Not yet toured). A home counts as toured when it has a Tour Notes entry or a Visit Date, whatever its status.
+- All the filters work together, and the counts next to each choice update to match the others, so every number is what you would see if you picked it. A Clear filters button appears while any filter is on.
+- New: an Edit notes section on each home's card for people with edit access, so a home's Notes can be changed from Runway. If the cell was changed in the sheet after the page loaded, the save is refused and the page refreshes.
+- New: choosing the rejection reason "Other (explain in Notes)", on a status change or on the tour page, now asks for a few words, which are added to the end of the home's Notes as "Other: ...".
+- A note under the filters explains the difference between the status filter (where a home stands now, so a home toured and rejected counts as Rejected) and the tour filter (which homes have been toured).
+
 ## 0.24.0
 - Each home card header has an arrow that points down when the card is closed and up when it is open, so it is clear the header can be tapped to open or close it.
 - A Collapse all button next to the status filters on the Housing page closes every open home card, and the sections inside them, and returns to the top of the list.
