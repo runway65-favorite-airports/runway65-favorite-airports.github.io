@@ -1,4 +1,4 @@
-/* Runway v0.24.0.
+/* Runway v0.25.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.24.0';
+  var APP_VERSION = '0.25.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var DRAFT_KEY = 'runway.tourdrafts'; // half-finished tours, kept on this device only
@@ -18,13 +18,14 @@
   var PLAN_TABS = { tasks: 'Tasks', decisions: 'Decisions', streams: 'Workstreams' };
   // Same list as the Rejected Reason question in the Home Listing Form.
   var REASONS = ['No enclosed WC', 'Small lots', 'Limited lot selection', 'Build quality or reviews', 'Flooring or finishes', 'Layout', 'No models available', 'Over budget', 'Other (explain in Notes)'];
+  var OTHER_REASON = 'Other (explain in Notes)';
   var STATUS_ORDER = ['Active', 'To tour', 'Researching', 'Toured', 'Rejected', 'Purchased'];
 
   var state = {
     token: null, expires: 0, user: null, sheet: loadStore(HOME_KEY), plan: loadStore(PLAN_KEY),
     role: null, planRole: null, data: null, planData: null, planError: null,
     loadedAt: null, busy: false, error: null, saving: false, notice: null, drafts: loadDrafts(), openForms: {}, tourRoom: {}, routeArg: '',
-    route: 'overview', openHomes: {}, openReq: {}, compareIds: null, compareDiff: false, filter: 'All', taskStream: 'All', showDone: false, needSignIn: true
+    route: 'overview', openHomes: {}, openReq: {}, compareIds: null, compareDiff: false, filter: 'All', fBuilder: 'All', fCity: 'All', fTour: 'All', taskStream: 'All', showDone: false, needSignIn: true
   };
 
   var app = document.getElementById('app');
@@ -519,7 +520,7 @@
   function splitReasons(text) {
     return String(text || '').split(',').map(function (t) { return t.trim(); }).filter(Boolean);
   }
-  function setHomeStatus(x, status, reasons, syncTour) {
+  function setHomeStatus(x, status, reasons, syncTour, otherNote) {
     var head = state.data.listingHead, iS = head.indexOf('Status'), iId = head.indexOf('Home ID'), iR = head.indexOf('Rejected Reason');
     if (iS < 0 || iId < 0) return Promise.reject(new Error('The Home Listing tab needs Status and Home ID columns.'));
     if (STATUS_ORDER.indexOf(status) < 0) return Promise.reject(new Error('Choose one of the standard statuses.'));
@@ -528,6 +529,7 @@
     if (rejected && !reasons.length) return Promise.reject(new Error('Pick at least one reason for the rejection.'));
     if (reasons.some(function (r) { return REASONS.indexOf(r) < 0; })) return Promise.reject(new Error('Choose reasons from the list.'));
     var reasonText = reasons.join(', ');
+    var newNotes = null;
     var tour = syncTour ? x.tour : null, th = state.data.tourHead || [];
     var iD = th.indexOf('Decision'), iTid = th.indexOf('Home ID');
     if (tour && (iD < 0 || iTid < 0)) return Promise.reject(new Error('The Home Tour Notes tab needs Decision and Home ID columns.'));
@@ -542,10 +544,15 @@
     }).then(function () {
       var data = [{ range: "'Home Listing'!" + colLetter(iS) + x.row, values: [[safeText(status)]] }];
       if (iR >= 0) data.push({ range: "'Home Listing'!" + colLetter(iR) + x.row, values: [[safeText(reasonText)]] });
+      if (otherNote && rejected && reasons.indexOf(OTHER_REASON) >= 0 && head.indexOf('Notes') >= 0) {
+        newNotes = (x.notes ? x.notes + '; ' : '') + 'Other: ' + otherNote;
+        data.push({ range: "'Home Listing'!" + colLetter(head.indexOf('Notes')) + x.row, values: [[safeText(newNotes)]] });
+      }
       if (tour) data.push({ range: "'Home Tour Notes'!" + colLetter(iD) + tour._row, values: [[safeText(status)]] });
       return api(homeBase() + '/values:batchUpdate', { method: 'POST', body: { valueInputOption: 'USER_ENTERED', data: data } });
     }).then(function () {
       x.status = status;
+      if (newNotes !== null) x.notes = newNotes;
       if (iR >= 0) x.reason = reasonText;
       if (tour) tour['Decision'] = status;
     });
@@ -626,9 +633,21 @@
         return closePlans.then(function () {
           if (!f.syncStatus) return null;
           var fresh = state.data.homes.filter(function (hm) { return hm.id === x.id; })[0];
-          return fresh ? setHomeStatus(fresh, f.decision, f.reasons, false) : null;
+          return fresh ? setHomeStatus(fresh, f.decision, f.reasons, false, f.otherNote) : null;
         });
       });
+  }
+  function setHomeNotes(x, text) {
+    var head = state.data.listingHead, iN = head.indexOf('Notes'), iId = head.indexOf('Home ID');
+    if (iN < 0 || iId < 0) return Promise.reject(new Error('The Home Listing tab needs Notes and Home ID columns.'));
+    return guardCell('Home Listing', iId, x.row, x.id).then(function () {
+      return api(homeBase() + '/values/' + enc("'Home Listing'!" + colLetter(iN) + x.row));
+    }).then(function (j) {
+      var cur = j.values && j.values[0] ? String(j.values[0][0]) : '';
+      if (cur.trim() !== String(x.notes || '').trim()) throw new Error('The sheet changed since it was loaded. Runway refreshed it. Please try again.');
+      return api(homeBase() + '/values:batchUpdate', { method: 'POST', body: { valueInputOption: 'USER_ENTERED',
+        data: [{ range: "'Home Listing'!" + colLetter(iN) + x.row, values: [[safeText(text)]] }] } });
+    }).then(function () { x.notes = text; });
   }
   function driveIdFrom(url) {
     var m = String(url).match(/\/d\/([A-Za-z0-9_-]{15,})/) || String(url).match(/[?&]id=([A-Za-z0-9_-]{15,})/);
@@ -1163,10 +1182,15 @@
     });
     var group = h('fieldset', { class: 'reasons', hidden: decision.value === 'Rejected' ? null : true }, h('legend', null, 'Why was it rejected? Pick all that apply.'),
       REASONS.map(function (r, i) { return h('label', null, boxes[i], r); }));
-    decision.addEventListener('change', function () { group.hidden = decision.value !== 'Rejected'; decisionNote.textContent = 'Decision: ' + decision.value; });
+    var otherBox = boxes[REASONS.indexOf(OTHER_REASON)];
+    var otherInput = keep(k, 'other', h('input', { type: 'text', maxlength: '300', placeholder: 'In a few words', 'aria-label': 'Explain Other' }));
+    var otherRow = h('label', { class: 'fld' }, h('span', null, 'Explain "Other" (added to this home\'s Notes)'), otherInput);
+    function syncOther() { otherRow.hidden = !(decision.value === 'Rejected' && otherBox.checked); }
+    otherBox.addEventListener('change', syncOther);
+    decision.addEventListener('change', function () { group.hidden = decision.value !== 'Rejected'; syncOther(); decisionNote.textContent = 'Decision: ' + decision.value; });
     var decisionNote = h('span', { class: 'muted small' }, 'Decision: ' + decision.value + (room.id === 'overall' ? '' : ' (change it under Overall)'));
     var overall = room.id === 'overall' ? h('div', { class: 'stack' },
-      h('div', { class: 'tfield' }, h('div', { class: 'ttitle' }, 'Decision'), decision), group,
+      h('div', { class: 'tfield' }, h('div', { class: 'ttitle' }, 'Decision'), decision), group, otherRow,
       h('label', { class: 'sync' }, sync, 'Also set this home\'s status in Home Listing to the Decision')) : null;
 
     function onSave() {
@@ -1175,13 +1199,15 @@
       var useSync = (state.drafts[k + '.sync'] === undefined ? '1' : state.drafts[k + '.sync']) === '1';
       var reasons = REASONS.filter(function (r) { return state.drafts[k + '.r:' + r] === '1'; });
       if (useSync && dec === 'Rejected' && !reasons.length) { toast('Pick at least one reason for the rejection.', true); goRoom(rooms.length - 1); return; }
+      var otherText = String(state.drafts[k + '.other'] || '').trim();
+      if (useSync && dec === 'Rejected' && reasons.indexOf(OTHER_REASON) >= 0 && !otherText) { toast('Explain "Other" in a few words. It is added to the home\'s Notes.', true); goRoom(rooms.length - 1); return; }
       var head = state.data.tourHead, answers = [];
       TOUR_ROOMS.forEach(function (r) { r.fields.forEach(function (f) {
         var header = matchHeader(head, f.h), v = header ? (state.drafts[tourFieldKey(x, header)] || '') : '';
         if (header && v !== '') answers.push({ header: header, value: v });
       }); });
       var decHeader = matchHeader(head, 'Decision'); if (decHeader) answers.push({ header: decHeader, value: dec });
-      submit(k, save(addTourRow(x, { date: date.value, decision: dec, answers: answers, syncStatus: useSync, reasons: reasons }), 'Tour logged'), function () { location.hash = '#/housing'; });
+      submit(k, save(addTourRow(x, { date: date.value, decision: dec, answers: answers, syncStatus: useSync, reasons: reasons, otherNote: otherText }), 'Tour logged'), function () { location.hash = '#/housing'; });
     }
     function discard() {
       if (!window.confirm('Discard this tour draft?')) return;
@@ -1342,23 +1368,45 @@
     var group = h('fieldset', { class: 'reasons', hidden: sel.value === 'Rejected' ? null : true },
       h('legend', null, 'Why was it rejected? Pick all that apply.'),
       REASONS.map(function (r, i) { return h('label', null, boxes[i], r); }));
-    sel.addEventListener('change', function () { group.hidden = sel.value !== 'Rejected'; });
+    var otherBox = boxes[REASONS.indexOf(OTHER_REASON)];
+    var otherInput = keep('status-' + x.id, 'other', h('input', { type: 'text', maxlength: '300', placeholder: 'In a few words', 'aria-label': 'Explain Other' }));
+    var otherRow = h('label', { class: 'fld' }, h('span', null, 'Explain "Other" (added to this home\'s Notes)'), otherInput);
+    function syncOther() { otherRow.hidden = !(sel.value === 'Rejected' && otherBox.checked); }
+    sel.addEventListener('change', function () { group.hidden = sel.value !== 'Rejected'; syncOther(); });
+    otherBox.addEventListener('change', syncOther); syncOther();
     function chosen() { return boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; }); }
     var tour = x.tour, td = tour ? String(tour['Decision'] || '').trim() : '';
     var sync = tour ? h('input', { type: 'checkbox', checked: true, 'aria-label': 'Also update the Decision in the latest Tour Notes entry' }) : null;
     var syncRow = tour ? h('label', { class: 'sync' }, sync, 'Also set the Decision in the latest Tour Notes entry' + (tour['Visit Date'] ? ' (' + tour['Visit Date'] + ')' : '') + ' to match') : null;
     var mismatch = tour && td && td.toLowerCase() !== x.status.toLowerCase()
       ? h('p', { class: 'muted small' }, 'Tour Notes says "' + td + '", but Home Listing says "' + x.status + '".') : null;
-    return h('div', { class: 'stack', style: 'gap:8px' }, field('Change status', sel), group, syncRow, mismatch,
+    return h('div', { class: 'stack', style: 'gap:8px' }, field('Change status', sel), group, otherRow, syncRow, mismatch,
       sel.value !== 'Rejected' && current.length ? h('p', { class: 'muted small' }, 'Changing a rejected home to another status clears its reason.') : null,
       h('button', { class: 'btn small', type: 'button', style: 'align-self:flex-start', disabled: state.saving ? true : null, onclick: function () {
         var picked = chosen();
         var doSync = !!(sync && sync.checked);
         var tourOff = doSync && td.toLowerCase() !== sel.value.toLowerCase();
         var same = sel.value === x.status && (sel.value !== 'Rejected' || picked.slice().sort().join('|') === current.slice().sort().join('|'));
-        if (same && !tourOff) { toast('Nothing has changed.', true); return; }
-        save(setHomeStatus(x, sel.value, picked, doSync), (sel.value === 'Rejected' ? 'Rejected, with reasons saved' : 'Status updated to ' + sel.value) + (doSync ? '. Tour Notes updated.' : ''));
+        var otherText = otherInput.value.trim(), newOther = picked.indexOf(OTHER_REASON) >= 0 && current.indexOf(OTHER_REASON) < 0;
+        if (sel.value === 'Rejected' && newOther && !otherText) { toast('Explain "Other" in a few words. It is added to the home\'s Notes.', true); return; }
+        var noteToAdd = sel.value === 'Rejected' && picked.indexOf(OTHER_REASON) >= 0 ? otherText : '';
+        if (same && !tourOff && !noteToAdd) { toast('Nothing has changed.', true); return; }
+        submit('status-' + x.id, save(setHomeStatus(x, sel.value, picked, doSync, noteToAdd), (sel.value === 'Rejected' ? 'Rejected, with reasons saved' : 'Status updated to ' + sel.value) + (doSync ? '. Tour Notes updated.' : '')));
       } }, 'Save status'));
+  }
+  function notesEditor(x) {
+    if (!canEditHome() || (state.data.listingHead || []).indexOf('Notes') < 0) return null;
+    var k = 'notes-' + x.id;
+    var area = h('textarea', { rows: '5', maxlength: '2000', 'aria-label': 'Notes for ' + homeName(x) });
+    area.value = x.notes || '';
+    keep(k, 'text', area);
+    return h('details', formAttrs(k, false, 'subform'), h('summary', null, 'Edit notes'),
+      h('div', { class: 'stack', style: 'margin-top:12px' }, area,
+        h('button', { class: 'btn small', type: 'button', style: 'align-self:flex-start', disabled: state.saving ? true : null, onclick: function () {
+          var text = area.value.trim();
+          if (text === String(x.notes || '').trim()) { toast('Nothing has changed.', true); return; }
+          submit(k, save(setHomeNotes(x, text), 'Notes saved'));
+        } }, 'Save notes')));
   }
   function homeCard(x) {
     var t = x.tour || {};
@@ -1384,6 +1432,7 @@
             h('div', { class: 'muted small' }, [c['Contact Name'], c['Channel'], c['Direction']].filter(Boolean).join(', ')),
             c['Summary'] ? h('div', { class: 'small' }, c['Summary']) : null);
         }))) : null,
+        notesEditor(x),
         reqChecklist(x),
         planSection(x),
         tourStart(x),
@@ -1395,14 +1444,25 @@
   }
   function viewHousing() {
     var homes = state.data.homes;
-    var seen = {};
-    homes.forEach(function (x) { seen[x.status] = true; });
+    var seen = {}, builders = {}, cities = {};
+    homes.forEach(function (x) { seen[x.status] = true; if (x.builder) builders[x.builder] = true; if (x.city) cities[x.city] = true; });
     var statuses = ['All'].concat(Object.keys(seen).sort(function (a, b) {
       var ia = STATUS_ORDER.indexOf(a), ib = STATUS_ORDER.indexOf(b);
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
     }));
+    var builderList = Object.keys(builders).sort(), cityList = Object.keys(cities).sort();
     if (statuses.indexOf(state.filter) < 0) state.filter = 'All';
-    var shown = homes.filter(function (x) { return state.filter === 'All' || x.status === state.filter; });
+    if (state.fBuilder !== 'All' && !builders[state.fBuilder]) state.fBuilder = 'All';
+    if (state.fCity !== 'All' && !cities[state.fCity]) state.fCity = 'All';
+    function toured(x) { return !!(x.tour || x.visit); }
+    // A home matches when it passes every filter; "skip" leaves one filter out so its own counts show the choices that remain.
+    function match(x, skip) {
+      return (skip === 'status' || state.filter === 'All' || x.status === state.filter) &&
+        (skip === 'builder' || state.fBuilder === 'All' || x.builder === state.fBuilder) &&
+        (skip === 'city' || state.fCity === 'All' || x.city === state.fCity) &&
+        (skip === 'tour' || state.fTour === 'All' || (state.fTour === 'Toured') === toured(x));
+    }
+    var shown = homes.filter(function (x) { return match(x, null); });
     shown.sort(function (a, b) {
       var ia = STATUS_ORDER.indexOf(a.status), ib = STATUS_ORDER.indexOf(b.status);
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.id.localeCompare(b.id);
@@ -1417,14 +1477,34 @@
         : null);
       if (!links.length) quick = null;
     }
+    function pickList(label, key, all, list, field) {
+      var sel = h('select', { 'aria-label': label }, [h('option', { value: 'All' }, all + ' (' + homes.filter(function (x) { return match(x, field); }).length + ')')].concat(
+        list.map(function (v) {
+          var n = homes.filter(function (x) { return match(x, field) && x[field] === v; }).length;
+          return h('option', { value: v, selected: state[key] === v ? true : null }, v + ' (' + n + ')');
+        })));
+      sel.value = state[key];
+      sel.addEventListener('change', function () { state[key] = sel.value; render(); });
+      return h('label', { class: 'fld filter' }, h('span', null, label), sel);
+    }
+    var anyFilter = state.filter !== 'All' || state.fBuilder !== 'All' || state.fCity !== 'All' || state.fTour !== 'All';
+    var tourChips = [['Toured', 'Toured'], ['Not yet toured', 'Not yet toured']].map(function (t) {
+      var n = homes.filter(function (x) { return match(x, 'tour') && (t[0] === 'Toured') === toured(x); }).length;
+      return h('button', { class: 'chip', type: 'button', 'aria-pressed': String(state.fTour === t[0]), onclick: function () { state.fTour = state.fTour === t[0] ? 'All' : t[0]; render(); } }, t[1] + ' (' + n + ')');
+    });
     return h('div', { class: 'stack' },
       h('div', null, h('h1', null, 'Housing'), h('p', { class: 'lede' }, 'Every home in your listing sheet, joined with tour notes and builder contacts by Home ID.')),
       h('div', { class: 'chips' }, h('a', { class: 'btn small', href: '#/compare' }, 'Compare homes side by side')),
       quick, canEditHome() ? addHomeForm() : null,
       h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by status' }, statuses.map(function (s) {
-        return h('button', { class: 'chip', type: 'button', 'aria-pressed': String(state.filter === s), onclick: function () { state.filter = s; render(); } }, s + ' (' + (s === 'All' ? homes.length : homes.filter(function (x) { return x.status === s; }).length) + ')');
+        return h('button', { class: 'chip', type: 'button', 'aria-pressed': String(state.filter === s), onclick: function () { state.filter = s; render(); } },
+          s + ' (' + homes.filter(function (x) { return match(x, 'status') && (s === 'All' || x.status === s); }).length + ')');
       }).concat([h('button', { class: 'btn ghost small', type: 'button', onclick: collapseAllHomes }, 'Collapse all')])),
-      shown.length ? h('div', { class: 'homes' }, shown.map(homeCard)) : h('p', { class: 'muted' }, 'No homes match this filter.')
+      h('div', { class: 'filters' }, pickList('Builder', 'fBuilder', 'All builders', builderList, 'builder'), pickList('City', 'fCity', 'All cities', cityList, 'city'),
+        h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by tour' }, tourChips),
+        anyFilter ? h('button', { class: 'btn ghost small', type: 'button', onclick: function () { state.filter = 'All'; state.fBuilder = 'All'; state.fCity = 'All'; state.fTour = 'All'; render(); } }, 'Clear filters') : null),
+      h('p', { class: 'muted small' }, 'The status filter shows where each home stands now. A home you toured and rejected is counted under Rejected. The tour filter shows which homes have been toured, whatever their status.'),
+      shown.length ? h('div', { class: 'homes' }, shown.map(homeCard)) : h('p', { class: 'muted' }, 'No homes match these filters.')
     );
   }
 

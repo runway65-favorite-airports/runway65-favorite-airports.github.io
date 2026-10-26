@@ -192,3 +192,10 @@ details>summary{cursor:pointer;font-weight:600;color:var(--teal);min-height:44px
 details.home>summary{position:relative;padding-right:52px}
 details.home>summary::after{content:"";position:absolute;right:22px;top:24px;width:10px;height:10px;border-right:2px solid var(--teal);border-bottom:2px solid var(--teal);transform:rotate(45deg);transition:transform .15s}
 details.home[open]>summary::after{top:28px;transform:rotate(-135deg)}
+
+/* v0.25.0: Housing filters */
+.filters{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end}
+.filters .filter{display:flex;flex-direction:column;gap:4px;min-width:170px;flex:1 1 170px;max-width:280px}
+.filters .filter select{font:inherit;font-size:16px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-height:44px;width:100%}
+
+.fld[hidden]{display:none}
