@@ -1,6 +1,6 @@
 # Runway
 
-Version 0.25.0. Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents from two Google Sheets. People with edit access can check off tasks and add tasks, decisions and journal entries. People with edit access can also change a home's status and pick the reasons for a rejection.
+Version 0.26.0. Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents from two Google Sheets. People with edit access can check off tasks and add tasks, decisions and journal entries. People with edit access can also change a home's status and pick the reasons for a rejection.
 
 ## Before you upload
 
@@ -61,6 +61,10 @@ Add a tab named `Home Checks` to the home-search sheet with the headers `Home ID
 ## Tour Plans tab (optional)
 
 Add a tab named `Tour Plans` to the home-search sheet with the headers `Home ID`, `Planned date`, `Time`, `Note`, `Status`, `Planned by`, `Planned on`. Runway saves planned tours there. Status is Planned, Done or Cancelled.
+
+## Documents and videos
+
+The Documents & Links tab can have two optional columns, `Type` (Document, Video, Article, Form or Other) and `Notes` (one line). Rows without a Type are listed as Document.
 
 ## Versions
 
