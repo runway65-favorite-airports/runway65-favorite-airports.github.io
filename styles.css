@@ -199,3 +199,10 @@ details.home[open]>summary::after{top:28px;transform:rotate(-135deg)}
 .filters .filter select{font:inherit;font-size:16px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-height:44px;width:100%}
 
 .fld[hidden]{display:none}
+
+/* v0.26.0: documents and videos list */
+.doclist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.doc{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:6px}
+.doc[hidden]{display:none}
+.doc .ttitle a{font-size:17px;font-weight:600;overflow-wrap:anywhere}
+.doc-note{color:var(--ink-2);line-height:1.45}

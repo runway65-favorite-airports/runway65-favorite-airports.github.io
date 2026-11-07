@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.26.0
+- The Documents page is now "Documents and videos" and is laid out as a list instead of a table. Each item shows its Type tag (Video, Document, Article, Form or Other), its workstream, the link as a title, an optional one-line note, and who added it and when. Newest first.
+- New: a search box, and Type and Workstream drop-down filters with a count ("3 of 12 items"). Everyone, including Viewers, can search and filter.
+- New: adding a link asks for a Type and an optional one-line Note. A YouTube or Vimeo link is set to Video for you. The Type and Note are saved to optional Type and Notes columns in the Documents & Links tab; until those columns exist, the form says how to add them. Rows with no Type count as Document.
+
 ## 0.25.0
 - Housing: new Builder and City filters (drop-down lists) and a tour filter (Toured, Not yet toured). A home counts as toured when it has a Tour Notes entry or a Visit Date, whatever its status.
 - All the filters work together, and the counts next to each choice update to match the others, so every number is what you would see if you picked it. A Clear filters button appears while any filter is on.
