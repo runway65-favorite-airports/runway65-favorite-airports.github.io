@@ -206,3 +206,12 @@ details.home[open]>summary::after{top:28px;transform:rotate(-135deg)}
 .doc[hidden]{display:none}
 .doc .ttitle a{font-size:17px;font-weight:600;overflow-wrap:anywhere}
 .doc-note{color:var(--ink-2);line-height:1.45}
+
+/* v0.27.0: search */
+.searchbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;max-width:1180px;margin:12px auto 0;padding:0 24px}
+.searchbar .searchbox{flex:1 1 260px;min-width:0}
+.results{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.result{padding:12px 0;border-top:1px solid var(--line-2);display:flex;flex-direction:column;gap:4px}
+.result:first-child{border-top:0}
+.result mark{background:rgba(94,196,190,.35);color:inherit;border-radius:3px;padding:0 2px}
+.linkbtn{font:inherit;font-size:17px;font-weight:600;color:var(--teal);background:none;border:0;padding:0;text-align:left;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
