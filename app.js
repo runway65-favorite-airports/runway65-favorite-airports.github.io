@@ -1,4 +1,4 @@
-/* Runway v0.26.0.
+/* Runway v0.27.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.26.0';
+  var APP_VERSION = '0.27.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var DRAFT_KEY = 'runway.tourdrafts'; // half-finished tours, kept on this device only
@@ -25,7 +25,7 @@
     token: null, expires: 0, user: null, sheet: loadStore(HOME_KEY), plan: loadStore(PLAN_KEY),
     role: null, planRole: null, data: null, planData: null, planError: null,
     loadedAt: null, busy: false, error: null, saving: false, notice: null, drafts: loadDrafts(), openForms: {}, tourRoom: {}, routeArg: '',
-    route: 'overview', openHomes: {}, openReq: {}, compareIds: null, compareDiff: false, filter: 'All', fBuilder: 'All', fCity: 'All', fTour: 'All', taskStream: 'All', showDone: false, needSignIn: true
+    route: 'overview', openHomes: {}, openReq: {}, compareIds: null, compareDiff: false, filter: 'All', fBuilder: 'All', fCity: 'All', fTour: 'All', query: '', scrollTo: '', taskStream: 'All', showDone: false, needSignIn: true
   };
 
   var app = document.getElementById('app');
@@ -1411,7 +1411,7 @@
   function homeCard(x) {
     var t = x.tour || {};
     var priceText = money(x.price) + (x.upgrade && x.upgrade !== x.price ? ' (' + money(x.upgrade) + ' with upgrades)' : '');
-    return h('details', { class: 'home', open: state.openHomes[x.id] ? true : null, ontoggle: function (e) { state.openHomes[x.id] = e.target.open; } },
+    return h('details', { class: 'home', 'data-home': x.id, open: state.openHomes[x.id] ? true : null, ontoggle: function (e) { state.openHomes[x.id] = e.target.open; } },
       h('summary', null,
         h('div', { class: 'head' }, h('h3', null, homeName(x)), h('strong', null, money(x.price))),
         h('div', { class: 'muted small' }, [x.community, x.city].filter(Boolean).join(', ')),
@@ -1573,6 +1573,143 @@
         h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by where it is tracked' }, chipEls), search,
         h('p', { class: 'muted small' }, 'Tour Notes and Home Listings: captured when you log a tour or add a home. Pre-qualify: confirm before adding a home to the pipeline. Not captured: check it yourself on each visit.')),
       cards, empty);
+  }
+
+  /* ----- Search ----- */
+  var SEARCH_GROUPS = ['Homes', 'Tours', 'Contacts', 'Planned tours', 'Tasks', 'Decisions', 'Journal', 'Documents', 'Requirements'];
+  function rawFields(r, skip) {
+    var out = [];
+    Object.keys(r).forEach(function (k) { if (k && k !== '_row' && skip.indexOf(k) < 0 && String(r[k] || '').trim() !== '') out.push([k, String(r[k])]); });
+    return out;
+  }
+  function openHome(id) {
+    state.filter = 'All'; state.fBuilder = 'All'; state.fCity = 'All'; state.fTour = 'All';
+    state.openHomes[id] = true; state.scrollTo = id;
+    if (location.hash === '#/housing') render(); else location.hash = '#/housing';
+  }
+  function searchItems() {
+    var d = state.data, P = state.planData, items = [], names = {};
+    d.homes.forEach(function (x) { names[x.id] = homeName(x); });
+    d.homes.forEach(function (x) {
+      items.push({ kind: 'Homes', title: homeName(x), sub: [x.id, x.status, x.city].filter(Boolean).join(' | '), go: function () { openHome(x.id); },
+        fields: [['Status', x.status], ['Builder', x.builder], ['Model', x.model], ['Community', x.community], ['City', x.city], ['Address', x.address], ['Notes', x.notes],
+          ['Rejected reason', x.reason], ['Contact', x.contact], ['Phone', x.phone], ['Home ID', x.id]].filter(function (f) { return f[1]; }) });
+    });
+    (d.tours || []).forEach(function (r) {
+      var id = r['Home ID']; if (!id) return;
+      items.push({ kind: 'Tours', title: 'Tour of ' + (names[id] || id) + (r['Visit Date'] ? ' (' + r['Visit Date'] + ')' : ''), sub: id, go: function () { openHome(id); },
+        fields: rawFields(r, ['Timestamp', 'Home ID', 'Which home?', 'Home Identification']) });
+    });
+    (d.contacts || []).forEach(function (r) {
+      var id = r['Home ID'];
+      items.push({ kind: 'Contacts', title: (r['Subject'] || 'Contact') + (r['Builder'] ? ' (' + r['Builder'] + ')' : ''), sub: [id, r['Date']].filter(Boolean).join(' | '), go: id ? function () { openHome(id); } : function () { go('housing'); },
+        fields: rawFields(r, ['Timestamp', 'Home ID']) });
+    });
+    (d.plans && d.plans.list || []).filter(function (p) { return p.status === 'Planned'; }).forEach(function (p) {
+      items.push({ kind: 'Planned tours', title: 'Planned tour: ' + (names[p.id] || p.id), sub: planWhen(p), go: function () { openHome(p.id); }, fields: [['Note', p.note], ['When', planWhen(p)]].filter(function (f) { return f[1]; }) });
+    });
+    (d.docs || []).forEach(function (r) {
+      var url = r['URL'] || '';
+      items.push({ kind: 'Documents', title: r['Title'] || 'Untitled', sub: [r['Type'] || 'Document', r['Workstream']].filter(Boolean).join(' | '), url: url, go: function () { go('documents'); },
+        fields: [['Note', r['Notes']], ['Workstream', r['Workstream']], ['Type', r['Type']], ['Owner', r['Owner']]].filter(function (f) { return f[1]; }) });
+    });
+    if (P) {
+      P.tasks.forEach(function (t) {
+        items.push({ kind: 'Tasks', title: t.title, sub: [t.stream, t.owner, t.status].filter(Boolean).join(' | '), go: function () { go('tasks'); },
+          fields: [['Notes', t.notes], ['Workstream', t.stream], ['Owner', t.owner], ['Status', t.status]].filter(function (f) { return f[1]; }) });
+      });
+      P.decisions.forEach(function (t) {
+        items.push({ kind: 'Decisions', title: t.title, sub: [t.stream, t.status].filter(Boolean).join(' | '), go: function () { go('decisions'); },
+          fields: [['Options', t.options], ['Owners', t.owners], ['Reasoning', t.reasoning], ['Workstream', t.stream], ['Status', t.status]].filter(function (f) { return f[1]; }) });
+      });
+      P.journal.forEach(function (e) {
+        items.push({ kind: 'Journal', title: e.title, sub: [e.dateText, e.by].filter(Boolean).join(' | '), go: function () { go('journal'); }, fields: [['Entry', e.detail]].filter(function (f) { return f[1]; }) });
+      });
+      (P.requirements || []).forEach(function (q) {
+        items.push({ kind: 'Requirements', title: q.text, sub: [q.section, q.group].filter(Boolean).join(' | '), go: function () { go('requirements'); },
+          fields: [['Detail', q.detail], ['Section', q.section], ['Group', q.group]].filter(function (f) { return f[1]; }) });
+      });
+    }
+    return items;
+  }
+  function searchTokens(q) { return String(q || '').toLowerCase().split(/\s+/).filter(Boolean); }
+  function runQuery(q) {
+    var tokens = searchTokens(q), found = [];
+    if (!tokens.length) return found;
+    searchItems().forEach(function (it) {
+      var title = String(it.title || '').toLowerCase(), hay = title + ' ' + it.fields.map(function (f) { return f[1]; }).join(' ').toLowerCase() + ' ' + String(it.sub || '').toLowerCase();
+      if (!tokens.every(function (t) { return hay.indexOf(t) >= 0; })) return;
+      it.score = 1 + tokens.filter(function (t) { return title.indexOf(t) >= 0; }).length * 3;
+      found.push(it);
+    });
+    return found.sort(function (a, b) { return b.score - a.score; });
+  }
+  function highlight(text, tokens) {
+    var t = String(text);
+    if (!tokens.length) return [t];
+    var re = new RegExp('(' + tokens.map(function (x) { return x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }).join('|') + ')', 'ig');
+    return t.split(re).map(function (part, i) { return i % 2 ? h('mark', null, part) : part; });
+  }
+  function snippetFor(it, tokens) {
+    for (var i = 0; i < it.fields.length; i++) {
+      var f = it.fields[i], low = String(f[1]).toLowerCase(), at = -1;
+      for (var j = 0; j < tokens.length && at < 0; j++) at = low.indexOf(tokens[j]);
+      if (at >= 0) {
+        var from = Math.max(0, at - 50), to = Math.min(f[1].length, at + 90);
+        return [h('span', { class: 'muted' }, f[0] + ': '), (from > 0 ? '...' : '')].concat(highlight(f[1].slice(from, to), tokens), [to < f[1].length ? '...' : '']);
+      }
+    }
+    return null;
+  }
+  function runSearch(q) {
+    q = String(q || '').trim();
+    if (q.length < 2) { toast('Type at least two letters to search.', true); return; }
+    state.query = q;
+    var target = '#/search/' + encodeURIComponent(q);
+    if (location.hash === target) render(); else location.hash = target;
+  }
+  function claudePrompt(q) {
+    var clean = function (t) { return String(t || '').replace(/[<>]/g, '').trim(); };
+    var files = [state.sheet && state.sheet.name ? '"' + clean(state.sheet.name) + '" (homes, tour notes, contacts, documents)' : '',
+      state.plan && state.plan.name ? '"' + clean(state.plan.name) + '" (tasks, decisions, journal, requirements)' : ''].filter(Boolean).join(' and ');
+    return 'I use a planning app called Runway. Its data is in these Google Sheets in my Google Drive: ' + files + '. Please read them and answer this question: ' + clean(q).slice(0, 500);
+  }
+  function askClaude(q) {
+    var clean = String(q || '').replace(/[<>]/g, '').trim().slice(0, 500);
+    if (!clean) { toast('Type your question first, then choose Ask Claude.', true); return; }
+    try { if (navigator.clipboard) navigator.clipboard.writeText(clean); } catch (e) { /* ignore */ }
+    toast('Opening Claude with your question. If the box is empty, paste it.');
+    window.open('https://claude.ai/new?q=' + encodeURIComponent(claudePrompt(clean)), '_blank', 'noopener');
+  }
+  function searchBar() {
+    var input = h('input', { type: 'search', class: 'searchbox', placeholder: 'Search Runway, or type a question to ask Claude', 'aria-label': 'Search Runway' });
+    input.value = state.route === 'search' ? state.routeArg : state.query;
+    input.addEventListener('input', function () { state.query = input.value; });
+    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') runSearch(input.value); });
+    return h('div', { class: 'searchbar' }, input,
+      h('button', { class: 'btn small', type: 'button', onclick: function () { runSearch(input.value); } }, 'Search'),
+      h('button', { class: 'btn ghost small', type: 'button', onclick: function () { askClaude(input.value); } }, 'Ask Claude'));
+  }
+  function viewSearch() {
+    var q = state.routeArg, tokens = searchTokens(q);
+    var head = h('div', null, h('h1', null, 'Search'), h('p', { class: 'lede' }, q ? 'Results for "' + q + '" across homes, tours, contacts, tasks, decisions, the journal, documents and requirements.' : 'Type a word or two in the box above.'));
+    if (String(q).trim().length < 2) return h('div', { class: 'stack' }, head);
+    var found = runQuery(q);
+    var groups = SEARCH_GROUPS.map(function (g) { return { name: g, items: found.filter(function (it) { return it.kind === g; }) }; }).filter(function (g) { return g.items.length; });
+    var ask = h('section', { class: 'card stack' }, h('h2', null, 'Not what you wanted?'),
+      h('p', { class: 'muted' }, 'Search finds words in Runway. To ask a question in plain language, such as "which Active homes have an enclosed WC?", use Ask Claude. It opens Claude in a new tab with your question filled in. Claude reads your sheets with your own Google access. Runway sends nothing.'),
+      h('button', { class: 'btn small', type: 'button', style: 'align-self:flex-start', onclick: function () { askClaude(q); } }, 'Ask Claude this'));
+    if (!groups.length) return h('div', { class: 'stack' }, head, h('section', { class: 'card' }, h('p', null, 'Nothing matches "' + q + '". Try fewer or different words.')), ask);
+    return h('div', { class: 'stack' }, head, h('p', { class: 'muted small', role: 'status' }, found.length + (found.length === 1 ? ' result' : ' results')),
+      groups.map(function (g) {
+        return h('section', { class: 'card stack' }, h('h2', null, g.name + ' (' + g.items.length + ')'),
+          h('ul', { class: 'results' }, g.items.slice(0, 10).map(function (it) {
+            var sn = snippetFor(it, tokens);
+            var titleEl = it.url && /^https:\/\//i.test(it.url) ? h('a', { href: it.url, target: '_blank', rel: 'noopener noreferrer' }, highlight(it.title, tokens))
+              : h('button', { class: 'linkbtn', type: 'button', onclick: it.go }, highlight(it.title, tokens));
+            return h('li', { class: 'result' }, h('div', { class: 'ttitle' }, titleEl), it.sub ? h('div', { class: 'muted small' }, it.sub) : null, sn ? h('div', { class: 'small' }, sn) : null);
+          })), g.items.length > 10 ? h('p', { class: 'muted small' }, 'Showing the first 10 of ' + g.items.length + '. Add a word to narrow it down.') : null);
+      }), ask);
   }
 
   /* ----- Compare ----- */
@@ -1846,7 +1983,7 @@
   /* ---------- shell ---------- */
   var ROUTES = {
     overview: ['Overview', viewOverview], tasks: ['Tasks', viewTasks], decisions: ['Decisions', viewDecisions],
-    housing: ['Housing', viewHousing], tour: ['Log a tour', viewTour], compare: ['Compare homes', viewCompare], requirements: ['Requirements', viewRequirements], chronology: ['Chronology', viewChronology], journal: ['Journal', viewJournal], documents: ['Documents', viewDocuments], sheets: ['Sheets', viewSheets]
+    housing: ['Housing', viewHousing], search: ['Search', viewSearch], tour: ['Log a tour', viewTour], compare: ['Compare homes', viewCompare], requirements: ['Requirements', viewRequirements], chronology: ['Chronology', viewChronology], journal: ['Journal', viewJournal], documents: ['Documents', viewDocuments], sheets: ['Sheets', viewSheets]
   };
   var NAV = ['overview', 'tasks', 'decisions', 'housing', 'requirements', 'chronology', 'journal', 'documents'];
 
@@ -1932,7 +2069,7 @@
       h('a', { href: 'privacy.html' }, 'Privacy policy'));
     var note = state.notice ? h('div', { class: 'notice', role: 'status' }, h('span', null, state.notice),
       h('button', { class: 'btn ghost small', type: 'button', onclick: function () { state.notice = null; render(); } }, 'Dismiss')) : null;
-    return h('div', null, banner, top, note, h('main', null, content), foot);
+    return h('div', null, banner, top, state.data ? searchBar() : null, note, h('main', null, content), foot);
   }
 
   function render() {
@@ -1944,7 +2081,13 @@
         : state.busy && !state.data ? screenLoading()
         : screenApp()
     );
-    try { if (y) window.scrollTo(0, y); } catch (e) { /* ignore */ }
+    if (state.scrollTo) {
+      var want = state.scrollTo; state.scrollTo = '';
+      var el = [].slice.call(document.querySelectorAll('details.home')).filter(function (c) { return c.getAttribute('data-home') === want; })[0];
+      try { if (el) { el.scrollIntoView({ block: 'start' }); window.scrollBy(0, -80); } } catch (e) { /* ignore */ }
+    } else {
+      try { if (y) window.scrollTo(0, y); } catch (e) { /* ignore */ }
+    }
     document.title = (state.needSignIn ? 'Runway' : ROUTES[state.route][0] + ' | Runway');
   }
 

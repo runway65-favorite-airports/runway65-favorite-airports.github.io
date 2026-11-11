@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.27.0
+- New: a Search box under the header on every page. It looks through homes (including notes and rejection reasons), tour notes, contacts, planned tours, tasks, decisions, journal entries, documents and videos, and requirements. A result shows the matching words highlighted, and every word you type must match. Everything runs in your browser on data Runway has already loaded, so nothing is sent anywhere, and Viewers see only what they can already see.
+- Choosing a home, tour, contact or planned tour opens that home's card on the Housing page and scrolls to it. Other results open their page, and a document result opens its link.
+- New: an Ask Claude button beside the search box, and on the results page. It opens claude.ai in a new tab with your typed question and the names of your two sheets filled in, so Claude can answer from your sheets using your own Google access. Runway does not send your data. The question is also copied, in case the box opens empty.
+- The privacy policy describes both.
+
 ## 0.26.0
 - The Documents page is now "Documents and videos" and is laid out as a list instead of a table. Each item shows its Type tag (Video, Document, Article, Form or Other), its workstream, the link as a title, an optional one-line note, and who added it and when. Newest first.
 - New: a search box, and Type and Workstream drop-down filters with a count ("3 of 12 items"). Everyone, including Viewers, can search and filter.
