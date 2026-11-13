@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.29.1
+- Fixed: there was no way out of a search. A Close search button now appears in the search bar while you are on the results page, with a Close search and go back button on the results page itself. Both clear the box and return you to the page you searched from. Pressing Escape in the box does the same, and a Clear button appears when you have typed something on any other page.
+- The search box now empties by itself when you leave the results page, for example by opening a result or choosing a menu item.
+
 ## 0.29.0
 - New: Compare builders on the Builders page. Pick two or three builders (a "Pick my To-tour builders" button chooses the ones marked priority 1) and see them side by side: vetting, trip priority, ratings, GuildQuality, warranty, references, your homes from each, what to ask at the visit, notes, division, website and when each was last checked. On narrow screens the table scrolls sideways.
 
