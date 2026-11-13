@@ -215,3 +215,11 @@ details.home[open]>summary::after{top:28px;transform:rotate(-135deg)}
 .result:first-child{border-top:0}
 .result mark{background:rgba(94,196,190,.35);color:inherit;border-radius:3px;padding:0 2px}
 .linkbtn{font:inherit;font-size:17px;font-weight:600;color:var(--teal);background:none;border:0;padding:0;text-align:left;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+
+/* v0.28.0: builders */
+.builderbox{border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;background:var(--teal-soft)}
+.askbox{border-left:4px solid var(--teal);background:var(--teal-soft);border-radius:8px;padding:10px 14px;display:flex;flex-direction:column;gap:4px}
+.brow{display:flex;flex-direction:column;gap:2px;overflow-wrap:anywhere}
+details.builder>summary{cursor:pointer;list-style:none;display:flex;flex-direction:column;gap:6px;position:relative;padding-right:40px}
+details.builder>summary::after{content:"";position:absolute;right:6px;top:8px;width:10px;height:10px;border-right:2px solid var(--teal);border-bottom:2px solid var(--teal);transform:rotate(45deg);transition:transform .15s}
+details.builder[open]>summary::after{top:12px;transform:rotate(-135deg)}

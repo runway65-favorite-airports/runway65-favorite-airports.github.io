@@ -1,4 +1,4 @@
-/* Runway v0.27.0.
+/* Runway v0.28.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.27.0';
+  var APP_VERSION = '0.28.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var DRAFT_KEY = 'runway.tourdrafts'; // half-finished tours, kept on this device only
@@ -25,7 +25,7 @@
     token: null, expires: 0, user: null, sheet: loadStore(HOME_KEY), plan: loadStore(PLAN_KEY),
     role: null, planRole: null, data: null, planData: null, planError: null,
     loadedAt: null, busy: false, error: null, saving: false, notice: null, drafts: loadDrafts(), openForms: {}, tourRoom: {}, routeArg: '',
-    route: 'overview', openHomes: {}, openReq: {}, compareIds: null, compareDiff: false, filter: 'All', fBuilder: 'All', fCity: 'All', fTour: 'All', query: '', scrollTo: '', taskStream: 'All', showDone: false, needSignIn: true
+    route: 'overview', openHomes: {}, openReq: {}, compareIds: null, compareDiff: false, filter: 'All', fBuilder: 'All', fCity: 'All', fTour: 'All', query: '', scrollTo: '', scrollBuilder: '', openBuilders: {}, fVet: 'All', taskStream: 'All', showDone: false, needSignIn: true
   };
 
   var app = document.getElementById('app');
@@ -211,6 +211,38 @@
   }
 
   /* ---------- data ---------- */
+  function buildBuilders(rows) {
+    var out = { has: false, list: [] };
+    if (!rows) return out;
+    out.has = !!(rows.head && rows.head.length);
+    rows.forEach(function (r) {
+      if (!r['Builder']) return;
+      var v = String(r['Vetting status'] || '').trim(), vl = v.toLowerCase();
+      out.list.push({ name: r['Builder'], division: r['Division'] || '', website: r['Website'] || '', gq: r['GuildQuality'] || '', gqLink: r['GuildQuality link'] || '',
+        ratings: r['Other ratings'] || '', warranty: r['Warranty'] || '', refs: r['References'] || '',
+        vetting: vl.indexOf('approved') === 0 ? 'Approved' : vl.indexOf('concern') === 0 ? 'Concern' : vl.indexOf('pending') === 0 ? 'Pending' : v,
+        notes: r['Notes'] || '', checked: r['Last checked'] || '', sources: r['Sources'] || '', ask: r['Ask at the visit'] || '', priority: r['Trip priority'] || '' });
+    });
+    return out;
+  }
+  function builderFor(x) {
+    if (!state.data || !state.data.builders || !x || !x.builder) return null;
+    var key = normKey(x.builder), list = state.data.builders.list, hit = null;
+    list.forEach(function (b) { if (!hit && normKey(b.name) === key) hit = b; });
+    list.forEach(function (b) { var k = normKey(b.name); if (!hit && key.length >= 4 && k.length >= 4 && (k.indexOf(key) === 0 || key.indexOf(k) === 0)) hit = b; });
+    return hit;
+  }
+  function vetTag(b, label) {
+    return h('span', { class: 'tag' + (b.vetting === 'Approved' ? ' active' : b.vetting === 'Concern' ? ' warn' : '') }, (label || 'Builder: ') + (b.vetting || 'Not rated'));
+  }
+  function shortText(t, n) { t = String(t || ''); return t.length > n ? t.slice(0, n).replace(/\s+\S*$/, '') + '...' : t; }
+  function builderBox(x) {
+    var b = builderFor(x); if (!b) return null;
+    return h('div', { class: 'builderbox' },
+      h('div', { class: 'chips', style: 'gap:8px;align-items:center' }, h('strong', null, 'Builder: ' + b.name), vetTag(b, ''), h('a', { class: 'small', href: '#/builders/' + enc(b.name) }, 'Open the builder page')),
+      b.ratings ? h('div', { class: 'small' }, shortText(b.ratings, 200)) : null,
+      b.ask ? h('div', { class: 'small' }, h('strong', null, 'Ask at the visit: '), b.ask) : null);
+  }
   function buildPlans(rows) {
     var out = { has: false, head: [], list: [] };
     if (!rows) return out;
@@ -397,9 +429,14 @@
             .then(function (c) { by.plans = table(c.values); })
             .catch(function () { by.plans = null; });
         })
+        .then(function () {
+          return api('https://sheets.googleapis.com/v4/spreadsheets/' + id + '/values/' + enc("'Builders'") + '?valueRenderOption=FORMATTED_VALUE')
+            .then(function (c) { by.builders = table(c.values); })
+            .catch(function () { by.builders = null; });
+        })
         .then(function () { return by; });
     }).then(function (by) {
-      state.data = { homes: buildHomes(by), tours: by.tours || [], contacts: by.contacts || [], docs: by.docs, listingHead: (by.listing && by.listing.head) || [], docsHead: (by.docs && by.docs.head) || [], listingRows: by.listing || [], tourHead: (by.tours && by.tours.head) || [], checks: buildChecks(by.checks), plans: buildPlans(by.plans), contactsHead: (by.contacts && by.contacts.head) || [] };
+      state.data = { homes: buildHomes(by), tours: by.tours || [], contacts: by.contacts || [], docs: by.docs, listingHead: (by.listing && by.listing.head) || [], docsHead: (by.docs && by.docs.head) || [], listingRows: by.listing || [], tourHead: (by.tours && by.tours.head) || [], checks: buildChecks(by.checks), plans: buildPlans(by.plans), builders: buildBuilders(by.builders), contactsHead: (by.contacts && by.contacts.head) || [] };
     });
   }
 
@@ -1171,6 +1208,7 @@
     var body = room.fields.map(function (f) {
       return h('div', { class: 'tfield' }, h('div', { class: 'ttitle' }, f.label), fieldControl(x, f));
     });
+    if (room.id === 'builder') { var bb = builderBox(x); if (bb) body.unshift(bb); }
     var decision = keep(k, 'decision', h('select', null, STATUS_ORDER.map(function (o) { return h('option', { value: o, selected: o === 'Toured' ? true : null }, o); })));
     var syncOn = (state.drafts[k + '.sync'] === undefined ? '1' : state.drafts[k + '.sync']) === '1';
     var sync = h('input', { type: 'checkbox', checked: syncOn ? true : null, 'aria-label': 'Also set the home status to the Decision' });
@@ -1415,7 +1453,7 @@
       h('summary', null,
         h('div', { class: 'head' }, h('h3', null, homeName(x)), h('strong', null, money(x.price))),
         h('div', { class: 'muted small' }, [x.community, x.city].filter(Boolean).join(', ')),
-        h('div', { class: 'chips' }, tagFor(x.status), x.added ? h('span', { class: 'tag' }, 'Added ' + x.added) : null, (function () { var np = nextPlan(x.id); return np ? h('span', { class: 'tag warn' }, 'Tour planned ' + planWhen(np)) : null; })(), (function () { var m = reqSummary(x); return m ? h('span', { class: 'tag' + (m.mustFail ? ' warn' : '') }, m.yes + ' of ' + m.total + ' requirements met' + (m.no ? ', ' + m.no + ' not met' : '')) : null; })(), x.reason ? h('span', { class: 'tag' }, x.reason) : null, x.visit ? h('span', { class: 'tag' }, 'Toured ' + x.visit) : null)
+        h('div', { class: 'chips' }, tagFor(x.status), x.added ? h('span', { class: 'tag' }, 'Added ' + x.added) : null, (function () { var b = builderFor(x); return b && b.vetting ? vetTag(b) : null; })(), (function () { var np = nextPlan(x.id); return np ? h('span', { class: 'tag warn' }, 'Tour planned ' + planWhen(np)) : null; })(), (function () { var m = reqSummary(x); return m ? h('span', { class: 'tag' + (m.mustFail ? ' warn' : '') }, m.yes + ' of ' + m.total + ' requirements met' + (m.no ? ', ' + m.no + ' not met' : '')) : null; })(), x.reason ? h('span', { class: 'tag' }, x.reason) : null, x.visit ? h('span', { class: 'tag' }, 'Toured ' + x.visit) : null)
       ),
       h('div', { class: 'body' },
         h('dl', { class: 'kv' },
@@ -1432,6 +1470,7 @@
             h('div', { class: 'muted small' }, [c['Contact Name'], c['Channel'], c['Direction']].filter(Boolean).join(', ')),
             c['Summary'] ? h('div', { class: 'small' }, c['Summary']) : null);
         }))) : null,
+        builderBox(x),
         notesEditor(x),
         reqChecklist(x),
         planSection(x),
@@ -1494,7 +1533,7 @@
     });
     return h('div', { class: 'stack' },
       h('div', null, h('h1', null, 'Housing'), h('p', { class: 'lede' }, 'Every home in your listing sheet, joined with tour notes and builder contacts by Home ID.')),
-      h('div', { class: 'chips' }, h('a', { class: 'btn small', href: '#/compare' }, 'Compare homes side by side')),
+      h('div', { class: 'chips' }, h('a', { class: 'btn small', href: '#/compare' }, 'Compare homes side by side'), h('a', { class: 'btn ghost small', href: '#/builders' }, 'Builders')),
       quick, canEditHome() ? addHomeForm() : null,
       h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by status' }, statuses.map(function (s) {
         return h('button', { class: 'chip', type: 'button', 'aria-pressed': String(state.filter === s), onclick: function () { state.filter = s; render(); } },
@@ -1576,7 +1615,7 @@
   }
 
   /* ----- Search ----- */
-  var SEARCH_GROUPS = ['Homes', 'Tours', 'Contacts', 'Planned tours', 'Tasks', 'Decisions', 'Journal', 'Documents', 'Requirements'];
+  var SEARCH_GROUPS = ['Homes', 'Builders', 'Tours', 'Contacts', 'Planned tours', 'Tasks', 'Decisions', 'Journal', 'Documents', 'Requirements'];
   function rawFields(r, skip) {
     var out = [];
     Object.keys(r).forEach(function (k) { if (k && k !== '_row' && skip.indexOf(k) < 0 && String(r[k] || '').trim() !== '') out.push([k, String(r[k])]); });
@@ -1612,6 +1651,10 @@
       var url = r['URL'] || '';
       items.push({ kind: 'Documents', title: r['Title'] || 'Untitled', sub: [r['Type'] || 'Document', r['Workstream']].filter(Boolean).join(' | '), url: url, go: function () { go('documents'); },
         fields: [['Note', r['Notes']], ['Workstream', r['Workstream']], ['Type', r['Type']], ['Owner', r['Owner']]].filter(function (f) { return f[1]; }) });
+    });
+    ((d.builders && d.builders.list) || []).forEach(function (b) {
+      items.push({ kind: 'Builders', title: b.name, sub: [b.vetting ? 'Vetting: ' + b.vetting : '', b.priority].filter(Boolean).join(' | '), go: function () { go('builders/' + enc(b.name)); },
+        fields: [['Ratings', b.ratings], ['Warranty', b.warranty], ['Ask at the visit', b.ask], ['Notes', b.notes], ['Division', b.division], ['GuildQuality', b.gq]].filter(function (f) { return f[1]; }) });
     });
     if (P) {
       P.tasks.forEach(function (t) {
@@ -1712,6 +1755,46 @@
       }), ask);
   }
 
+  /* ----- Builders ----- */
+  function priorityRank(b) { var m = String(b.priority || '').match(/^\s*(\d)/); return m ? +m[1] : 9; }
+  function viewBuilders() {
+    var head = h('div', null, h('h1', null, 'Builders'), h('p', { class: 'lede' }, 'What you know about each builder: reputation, warranty, references, and what to ask at the visit. Read from the Builders tab in the home-search sheet.'));
+    var B = state.data.builders;
+    if (!B || !B.has) return h('div', { class: 'stack' }, head, h('section', { class: 'card stack' }, h('h2', null, 'Add a Builders tab'),
+      h('p', null, 'In the home-search sheet, add a tab named "Builders" with these headers in row 1: Builder, Division, Website, GuildQuality, GuildQuality link, Other ratings, Warranty, References, Vetting status, Notes, Last checked, Sources, Ask at the visit, Trip priority.'),
+      h('p', { class: 'muted' }, 'The quickest way is to copy the Builders tab from the Retirement Research workbook: right-click its tab, choose Copy to, Existing spreadsheet, pick the home-search sheet, and rename the copy to Builders. Then choose Refresh.')));
+    var arg = state.routeArg ? normKey(state.routeArg) : '';
+    var vets = ['All', 'Approved', 'Pending', 'Concern'];
+    var counts = {}; vets.forEach(function (v) { counts[v] = v === 'All' ? B.list.length : B.list.filter(function (b) { return b.vetting === v; }).length; });
+    var shown = B.list.filter(function (b) { return state.fVet === 'All' || b.vetting === state.fVet; }).slice().sort(function (a, c) { return priorityRank(a) - priorityRank(c) || a.name.localeCompare(c.name); });
+    var chips = h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by vetting status' }, vets.map(function (v) {
+      return h('button', { class: 'chip', type: 'button', 'aria-pressed': String(state.fVet === v), onclick: function () { state.fVet = v; render(); } }, v + ' (' + counts[v] + ')');
+    }));
+    function row(label, val) { return val ? h('div', { class: 'brow' }, h('div', { class: 'muted small' }, label), h('div', null, val)) : null; }
+    var cards = shown.map(function (b) {
+      var homes = state.data.homes.filter(function (x) { return builderFor(x) === b; });
+      var contacts = (state.data.contacts || []).filter(function (c) { var nm = normKey(c['Builder']); return nm && (nm === normKey(b.name) || normKey(b.name).indexOf(nm) === 0 || nm.indexOf(normKey(b.name)) === 0); }).slice(0, 3);
+      var open = state.openBuilders[b.name] !== undefined ? state.openBuilders[b.name] : (arg && normKey(b.name) === arg);
+      return h('details', { class: 'card builder', 'data-builder': b.name, open: open ? true : null, ontoggle: function (e) { state.openBuilders[b.name] = e.target.open; } },
+        h('summary', null, h('div', { class: 'chips', style: 'gap:8px;align-items:center' }, h('strong', null, b.name), vetTag(b, ''), b.priority ? h('span', { class: 'tag' }, b.priority) : null),
+          b.ratings ? h('div', { class: 'muted small' }, shortText(b.ratings, 160)) : null),
+        h('div', { class: 'stack', style: 'margin-top:12px' },
+          b.ask ? h('div', { class: 'askbox' }, h('strong', null, 'Ask at the visit'), h('div', null, b.ask)) : null,
+          row('Division', b.division), row('Website', b.website && /^https:\/\//i.test(b.website) ? h('a', { href: b.website, target: '_blank', rel: 'noopener noreferrer' }, b.website) : b.website),
+          row('GuildQuality', b.gq ? [b.gq, b.gqLink && /^https:\/\//i.test(b.gqLink) ? [' ', h('a', { href: b.gqLink, target: '_blank', rel: 'noopener noreferrer' }, 'Profile')] : null] : ''),
+          row('Ratings', b.ratings), row('Warranty', b.warranty), row('References', b.refs), row('Notes', b.notes),
+          row('Last checked', b.checked), row('Sources', b.sources),
+          homes.length ? h('div', null, h('div', { class: 'muted small' }, 'Your homes from this builder'), h('div', { class: 'chips' }, homes.map(function (x) {
+            return h('button', { class: 'chip', type: 'button', onclick: function () { openHome(x.id); } }, homeName(x) + ' | ' + x.status);
+          }))) : null,
+          contacts.length ? h('div', null, h('div', { class: 'muted small' }, 'Recent contacts'), h('ul', { class: 'list' }, contacts.map(function (c) {
+            return h('li', null, [c['Date'], c['Contact Name'], c['Subject']].filter(Boolean).join(' | '));
+          }))) : null));
+    });
+    return h('div', { class: 'stack' }, head, h('section', { class: 'card stack' }, chips, h('p', { class: 'muted small' }, 'Sorted by trip priority. Vetting status is set in the sheet: Approved, Pending or Concern.')),
+      cards.length ? cards : h('p', { class: 'muted' }, 'No builders match.'));
+  }
+
   /* ----- Compare ----- */
   function viewCompare() {
     var d = state.data, homes = d.homes.slice();
@@ -1751,6 +1834,10 @@
     section('The basics');
     line('Status', picked.map(function (x) { return tagFor(x.status); }));
     line('Community', picked.map(function (x) { return [x.community, x.city].filter(Boolean).join(', '); }));
+    if (d.builders && d.builders.has) {
+      line('Builder vetting', picked.map(function (x) { var b = builderFor(x); return b ? vetTag(b, '') : ''; }));
+      line('Builder rating', picked.map(function (x) { var b = builderFor(x); return b ? shortText(b.ratings, 140) : ''; }));
+    }
     line('List price', picked.map(function (x) { return x.price !== null ? money(x.price) : ''; }));
     line('With upgrades', picked.map(function (x) { return x.upgrade !== null && x.upgrade !== x.price ? money(x.upgrade) : ''; }));
     line('Price per sq ft', picked.map(perSqft));
@@ -1983,7 +2070,7 @@
   /* ---------- shell ---------- */
   var ROUTES = {
     overview: ['Overview', viewOverview], tasks: ['Tasks', viewTasks], decisions: ['Decisions', viewDecisions],
-    housing: ['Housing', viewHousing], search: ['Search', viewSearch], tour: ['Log a tour', viewTour], compare: ['Compare homes', viewCompare], requirements: ['Requirements', viewRequirements], chronology: ['Chronology', viewChronology], journal: ['Journal', viewJournal], documents: ['Documents', viewDocuments], sheets: ['Sheets', viewSheets]
+    housing: ['Housing', viewHousing], search: ['Search', viewSearch], builders: ['Builders', viewBuilders], tour: ['Log a tour', viewTour], compare: ['Compare homes', viewCompare], requirements: ['Requirements', viewRequirements], chronology: ['Chronology', viewChronology], journal: ['Journal', viewJournal], documents: ['Documents', viewDocuments], sheets: ['Sheets', viewSheets]
   };
   var NAV = ['overview', 'tasks', 'decisions', 'housing', 'requirements', 'chronology', 'journal', 'documents'];
 
@@ -2081,7 +2168,11 @@
         : state.busy && !state.data ? screenLoading()
         : screenApp()
     );
-    if (state.scrollTo) {
+    if (state.route === 'builders' && state.routeArg) {
+      var wantB = normKey(state.routeArg);
+      var elB = [].slice.call(document.querySelectorAll('details.builder')).filter(function (c) { return normKey(c.getAttribute('data-builder')) === wantB; })[0];
+      try { if (elB) { elB.scrollIntoView({ block: 'start' }); window.scrollBy(0, -80); } } catch (e) { /* ignore */ }
+    } else if (state.scrollTo) {
       var want = state.scrollTo; state.scrollTo = '';
       var el = [].slice.call(document.querySelectorAll('details.home')).filter(function (c) { return c.getAttribute('data-home') === want; })[0];
       try { if (el) { el.scrollIntoView({ block: 'start' }); window.scrollBy(0, -80); } } catch (e) { /* ignore */ }

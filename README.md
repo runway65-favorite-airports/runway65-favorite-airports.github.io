@@ -1,6 +1,6 @@
 # Runway
 
-Version 0.27.0. Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents from two Google Sheets. People with edit access can check off tasks and add tasks, decisions and journal entries. People with edit access can also change a home's status and pick the reasons for a rejection.
+Version 0.28.0. Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents from two Google Sheets. People with edit access can check off tasks and add tasks, decisions and journal entries. People with edit access can also change a home's status and pick the reasons for a rejection.
 
 ## Before you upload
 
@@ -65,6 +65,10 @@ Add a tab named `Tour Plans` to the home-search sheet with the headers `Home ID`
 ## Documents and videos
 
 The Documents & Links tab can have two optional columns, `Type` (Document, Video, Article, Form or Other) and `Notes` (one line). Rows without a Type are listed as Document.
+
+## Builders tab (optional)
+
+Add a tab named `Builders` to the home-search sheet with the headers `Builder`, `Division`, `Website`, `GuildQuality`, `GuildQuality link`, `Other ratings`, `Warranty`, `References`, `Vetting status`, `Notes`, `Last checked`, `Sources`, `Ask at the visit`, `Trip priority`. The Builder name must match the Builder column in Home Listing (case, spaces and dots are ignored). The Retirement Research workbook has a ready-made Builders tab you can copy over.
 
 ## Versions
 

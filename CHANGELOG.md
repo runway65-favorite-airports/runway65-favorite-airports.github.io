@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.28.0
+- New: Builders page, read from an optional Builders tab in the home-search sheet (headers: Builder, Division, Website, GuildQuality, GuildQuality link, Other ratings, Warranty, References, Vetting status, Notes, Last checked, Sources, Ask at the visit, Trip priority). One expandable card per builder, sorted by trip priority, with a filter by vetting status (Approved, Pending, Concern), an "Ask at the visit" box, your homes from that builder (each opens its card on the Housing page) and recent contacts. Reached from a Builders button on the Housing page and from search results.
+- New: each home's card shows a vetting badge for its builder ("Builder: Approved", "Pending" or "Concern") and a builder box with the rating summary, the questions to ask and a link to the builder's page.
+- New: the Compare page has Builder vetting and Builder rating rows, and the Builder room of the tour page shows the builder's questions at the top, so they are in front of you during the visit.
+- New: builders are included in search.
+- Read-only for everyone. Edit builders in the sheet.
+
 ## 0.27.0
 - New: a Search box under the header on every page. It looks through homes (including notes and rejection reasons), tour notes, contacts, planned tours, tasks, decisions, journal entries, documents and videos, and requirements. A result shows the matching words highlighted, and every word you type must match. Everything runs in your browser on data Runway has already loaded, so nothing is sent anywhere, and Viewers see only what they can already see.
 - Choosing a home, tour, contact or planned tour opens that home's card on the Housing page and scrolls to it. Other results open their page, and a document result opens its link.
