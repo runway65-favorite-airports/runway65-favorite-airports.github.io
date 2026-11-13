@@ -1,4 +1,4 @@
-/* Runway v0.28.0.
+/* Runway v0.29.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.28.0';
+  var APP_VERSION = '0.29.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var DRAFT_KEY = 'runway.tourdrafts'; // half-finished tours, kept on this device only
@@ -25,7 +25,7 @@
     token: null, expires: 0, user: null, sheet: loadStore(HOME_KEY), plan: loadStore(PLAN_KEY),
     role: null, planRole: null, data: null, planData: null, planError: null,
     loadedAt: null, busy: false, error: null, saving: false, notice: null, drafts: loadDrafts(), openForms: {}, tourRoom: {}, routeArg: '',
-    route: 'overview', openHomes: {}, openReq: {}, compareIds: null, compareDiff: false, filter: 'All', fBuilder: 'All', fCity: 'All', fTour: 'All', query: '', scrollTo: '', scrollBuilder: '', openBuilders: {}, fVet: 'All', taskStream: 'All', showDone: false, needSignIn: true
+    route: 'overview', openHomes: {}, openReq: {}, compareIds: null, compareDiff: false, filter: 'All', fBuilder: 'All', fCity: 'All', fTour: 'All', query: '', scrollTo: '', scrollBuilder: '', openBuilders: {}, fVet: 'All', compareBuilders: [], taskStream: 'All', showDone: false, needSignIn: true
   };
 
   var app = document.getElementById('app');
@@ -233,7 +233,7 @@
     return hit;
   }
   function vetTag(b, label) {
-    return h('span', { class: 'tag' + (b.vetting === 'Approved' ? ' active' : b.vetting === 'Concern' ? ' warn' : '') }, (label || 'Builder: ') + (b.vetting || 'Not rated'));
+    return h('span', { class: 'tag' + (b.vetting === 'Approved' ? ' active' : b.vetting === 'Concern' ? ' warn' : '') }, (label === undefined ? 'Builder: ' : label) + (b.vetting || 'Not rated'));
   }
   function shortText(t, n) { t = String(t || ''); return t.length > n ? t.slice(0, n).replace(/\s+\S*$/, '') + '...' : t; }
   function builderBox(x) {
@@ -1771,6 +1771,41 @@
       return h('button', { class: 'chip', type: 'button', 'aria-pressed': String(state.fVet === v), onclick: function () { state.fVet = v; render(); } }, v + ' (' + counts[v] + ')');
     }));
     function row(label, val) { return val ? h('div', { class: 'brow' }, h('div', { class: 'muted small' }, label), h('div', null, val)) : null; }
+    var picks = (state.compareBuilders || []).filter(function (n) { return B.list.some(function (b) { return b.name === n; }); });
+    function togglePick(n) {
+      var cur = picks.slice(), i = cur.indexOf(n);
+      if (i >= 0) cur.splice(i, 1); else { if (cur.length >= 3) { toast('Compare up to three builders at a time.', true); return; } cur.push(n); }
+      state.compareBuilders = cur; render();
+    }
+    var ordered = B.list.slice().sort(function (a, c) { return priorityRank(a) - priorityRank(c) || a.name.localeCompare(c.name); });
+    var firstPicks = ordered.filter(function (b) { return priorityRank(b) === 1; }).slice(0, 3).map(function (b) { return b.name; });
+    var chosen = picks.map(function (n) { return B.list.filter(function (b) { return b.name === n; })[0]; });
+    var cmp = null;
+    if (chosen.length >= 2) {
+      var rows = [];
+      var line = function (label, f) { rows.push(h('tr', null, h('th', { scope: 'row' }, label), chosen.map(function (b) { return h('td', null, f(b)); }))); };
+      line('Vetting', function (b) { return b.vetting ? vetTag(b, '') : ''; });
+      line('Trip priority', function (b) { return b.priority; });
+      line('Ratings', function (b) { return b.ratings; });
+      line('GuildQuality', function (b) { return b.gq; });
+      line('Warranty', function (b) { return b.warranty; });
+      line('References', function (b) { return b.refs; });
+      line('Your homes', function (b) { return state.data.homes.filter(function (x) { return builderFor(x) === b; }).map(function (x) { return homeName(x) + ' (' + x.status + ')'; }).join('; '); });
+      line('Ask at the visit', function (b) { return b.ask; });
+      line('Notes', function (b) { return b.notes; });
+      line('Division', function (b) { return b.division; });
+      line('Website', function (b) { return b.website && /^https:\/\//i.test(b.website) ? h('a', { href: b.website, target: '_blank', rel: 'noopener noreferrer' }, 'Open') : b.website; });
+      line('Last checked', function (b) { return b.checked; });
+      cmp = h('section', { class: 'card scroll' }, h('table', { class: 'cmp' },
+        h('thead', null, h('tr', null, h('th', { scope: 'col' }, ''), chosen.map(function (b) { return h('th', { scope: 'col' }, b.name); }))), h('tbody', null, rows)));
+    }
+    var cmpCard = h('section', { class: 'card stack' }, h('h2', null, 'Compare builders'),
+      h('p', { class: 'muted small' }, picks.length === 1 ? 'Pick one more to see them side by side.' : 'Pick two or three builders to see them side by side.'),
+      h('div', { class: 'chips', role: 'group', 'aria-label': 'Builders to compare' }, ordered.map(function (b) {
+        return h('button', { class: 'chip', type: 'button', 'aria-pressed': String(picks.indexOf(b.name) >= 0), onclick: function () { togglePick(b.name); } }, b.name);
+      })),
+      h('div', { class: 'chips' }, firstPicks.length >= 2 ? h('button', { class: 'btn ghost small', type: 'button', onclick: function () { state.compareBuilders = firstPicks; render(); } }, 'Pick my To-tour builders') : null,
+        picks.length ? h('button', { class: 'btn ghost small', type: 'button', onclick: function () { state.compareBuilders = []; render(); } }, 'Clear') : null));
     var cards = shown.map(function (b) {
       var homes = state.data.homes.filter(function (x) { return builderFor(x) === b; });
       var contacts = (state.data.contacts || []).filter(function (c) { var nm = normKey(c['Builder']); return nm && (nm === normKey(b.name) || normKey(b.name).indexOf(nm) === 0 || nm.indexOf(normKey(b.name)) === 0); }).slice(0, 3);
@@ -1791,7 +1826,7 @@
             return h('li', null, [c['Date'], c['Contact Name'], c['Subject']].filter(Boolean).join(' | '));
           }))) : null));
     });
-    return h('div', { class: 'stack' }, head, h('section', { class: 'card stack' }, chips, h('p', { class: 'muted small' }, 'Sorted by trip priority. Vetting status is set in the sheet: Approved, Pending or Concern.')),
+    return h('div', { class: 'stack' }, head, cmpCard, cmp, h('section', { class: 'card stack' }, chips, h('p', { class: 'muted small' }, 'Sorted by trip priority. Vetting status is set in the sheet: Approved, Pending or Concern.')),
       cards.length ? cards : h('p', { class: 'muted' }, 'No builders match.'));
   }
 

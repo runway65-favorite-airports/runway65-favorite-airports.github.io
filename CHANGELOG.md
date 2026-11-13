@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.29.0
+- New: Compare builders on the Builders page. Pick two or three builders (a "Pick my To-tour builders" button chooses the ones marked priority 1) and see them side by side: vetting, trip priority, ratings, GuildQuality, warranty, references, your homes from each, what to ask at the visit, notes, division, website and when each was last checked. On narrow screens the table scrolls sideways.
+
 ## 0.28.0
 - New: Builders page, read from an optional Builders tab in the home-search sheet (headers: Builder, Division, Website, GuildQuality, GuildQuality link, Other ratings, Warranty, References, Vetting status, Notes, Last checked, Sources, Ask at the visit, Trip priority). One expandable card per builder, sorted by trip priority, with a filter by vetting status (Approved, Pending, Concern), an "Ask at the visit" box, your homes from that builder (each opens its card on the Housing page) and recent contacts. Reached from a Builders button on the Housing page and from search results.
 - New: each home's card shows a vetting badge for its builder ("Builder: Approved", "Pending" or "Concern") and a builder box with the rating summary, the questions to ask and a link to the builder's page.
