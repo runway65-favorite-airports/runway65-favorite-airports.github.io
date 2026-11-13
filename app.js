@@ -1,4 +1,4 @@
-/* Runway v0.29.0.
+/* Runway v0.29.1.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.29.0';
+  var APP_VERSION = '0.29.1';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var DRAFT_KEY = 'runway.tourdrafts'; // half-finished tours, kept on this device only
@@ -25,7 +25,7 @@
     token: null, expires: 0, user: null, sheet: loadStore(HOME_KEY), plan: loadStore(PLAN_KEY),
     role: null, planRole: null, data: null, planData: null, planError: null,
     loadedAt: null, busy: false, error: null, saving: false, notice: null, drafts: loadDrafts(), openForms: {}, tourRoom: {}, routeArg: '',
-    route: 'overview', openHomes: {}, openReq: {}, compareIds: null, compareDiff: false, filter: 'All', fBuilder: 'All', fCity: 'All', fTour: 'All', query: '', scrollTo: '', scrollBuilder: '', openBuilders: {}, fVet: 'All', compareBuilders: [], taskStream: 'All', showDone: false, needSignIn: true
+    route: 'overview', openHomes: {}, openReq: {}, compareIds: null, compareDiff: false, filter: 'All', fBuilder: 'All', fCity: 'All', fTour: 'All', query: '', beforeSearch: '', lastRoute: '', scrollTo: '', scrollBuilder: '', openBuilders: {}, fVet: 'All', compareBuilders: [], taskStream: 'All', showDone: false, needSignIn: true
   };
 
   var app = document.getElementById('app');
@@ -1708,8 +1708,13 @@
     q = String(q || '').trim();
     if (q.length < 2) { toast('Type at least two letters to search.', true); return; }
     state.query = q;
+    if (state.route !== 'search') state.beforeSearch = location.hash || '#/overview';
     var target = '#/search/' + encodeURIComponent(q);
     if (location.hash === target) render(); else location.hash = target;
+  }
+  function closeSearch() {
+    state.query = '';
+    if (state.route === 'search') { var back = state.beforeSearch && state.beforeSearch.indexOf('#/search') !== 0 ? state.beforeSearch : '#/overview'; state.beforeSearch = ''; location.hash = back; }
   }
   function claudePrompt(q) {
     var clean = function (t) { return String(t || '').replace(/[<>]/g, '').trim(); };
@@ -1727,15 +1732,21 @@
   function searchBar() {
     var input = h('input', { type: 'search', class: 'searchbox', placeholder: 'Search Runway, or type a question to ask Claude', 'aria-label': 'Search Runway' });
     input.value = state.route === 'search' ? state.routeArg : state.query;
-    input.addEventListener('input', function () { state.query = input.value; });
-    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') runSearch(input.value); });
+    var clearBtn = h('button', { class: 'btn ghost small', type: 'button', hidden: (state.route === 'search' || input.value) ? null : true, onclick: function () {
+      input.value = ''; closeSearch(); clearBtn.hidden = true; input.focus();
+    } }, state.route === 'search' ? 'Close search' : 'Clear');
+    input.addEventListener('input', function () { state.query = input.value; clearBtn.hidden = !input.value && state.route !== 'search'; });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') runSearch(input.value);
+      else if (e.key === 'Escape') { input.value = ''; closeSearch(); clearBtn.hidden = true; }
+    });
     return h('div', { class: 'searchbar' }, input,
       h('button', { class: 'btn small', type: 'button', onclick: function () { runSearch(input.value); } }, 'Search'),
-      h('button', { class: 'btn ghost small', type: 'button', onclick: function () { askClaude(input.value); } }, 'Ask Claude'));
+      h('button', { class: 'btn ghost small', type: 'button', onclick: function () { askClaude(input.value); } }, 'Ask Claude'), clearBtn);
   }
   function viewSearch() {
     var q = state.routeArg, tokens = searchTokens(q);
-    var head = h('div', null, h('h1', null, 'Search'), h('p', { class: 'lede' }, q ? 'Results for "' + q + '" across homes, tours, contacts, tasks, decisions, the journal, documents and requirements.' : 'Type a word or two in the box above.'));
+    var head = h('div', null, h('h1', null, 'Search'), h('button', { class: 'btn ghost small', type: 'button', onclick: closeSearch }, 'Close search and go back'), h('p', { class: 'lede' }, q ? 'Results for "' + q + '" across homes, tours, contacts, tasks, decisions, the journal, documents and requirements.' : 'Type a word or two in the box above.'));
     if (String(q).trim().length < 2) return h('div', { class: 'stack' }, head);
     var found = runQuery(q);
     var groups = SEARCH_GROUPS.map(function (g) { return { name: g, items: found.filter(function (it) { return it.kind === g; }) }; }).filter(function (g) { return g.items.length; });
@@ -2196,6 +2207,8 @@
 
   function render() {
     readRoute();
+    if (state.lastRoute === 'search' && state.route !== 'search') state.query = '';
+    state.lastRoute = state.route;
     var y = window.scrollY || 0;
     app.replaceChildren(
       state.needSignIn || !state.token && !state.data ? screenSignIn()
