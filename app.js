@@ -1,4 +1,4 @@
-/* Runway v0.30.0.
+/* Runway v0.31.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.30.0';
+  var APP_VERSION = '0.31.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var DRAFT_KEY = 'runway.tourdrafts'; // half-finished tours, kept on this device only
@@ -25,7 +25,7 @@
     token: null, expires: 0, user: null, sheet: loadStore(HOME_KEY), plan: loadStore(PLAN_KEY),
     role: null, planRole: null, data: null, planData: null, planError: null,
     loadedAt: null, busy: false, error: null, saving: false, notice: null, drafts: loadDrafts(), openForms: {}, tourRoom: {}, routeArg: '',
-    route: 'overview', openHomes: {}, openReq: {}, compareIds: null, compareDiff: false, filter: 'All', fBuilder: 'All', fCity: 'All', fTour: 'All', query: '', beforeSearch: '', lastRoute: '', scrollTo: '', scrollBuilder: '', openBuilders: {}, fVet: 'All', compareBuilders: [], taskStream: 'All', showDone: false, needSignIn: true
+    route: 'overview', openHomes: {}, openReq: {}, compareIds: null, compareDiff: false, filter: 'All', fBuilder: 'All', fCity: 'All', fTour: 'All', query: '', sortHomes: 'az', beforeSearch: '', lastRoute: '', scrollTo: '', scrollBuilder: '', openBuilders: {}, fVet: 'All', compareBuilders: [], taskStream: 'All', showDone: false, needSignIn: true
   };
 
   var app = document.getElementById('app');
@@ -1522,10 +1522,20 @@
         (skip === 'tour' || state.fTour === 'All' || (state.fTour === 'Toured') === toured(x));
     }
     var shown = homes.filter(function (x) { return match(x, null); });
+    var cmpText = function (p, q) { return String(p || '').localeCompare(String(q || ''), undefined, { sensitivity: 'base', numeric: true }); };
+    var addedTime = function (x) { var m = String(x.added || '').match(/^(\d+)\/(\d+)\/(\d{4})$/); return m ? new Date(+m[3], +m[1] - 1, +m[2]).getTime() : 0; };
     shown.sort(function (a, b) {
+      if (state.sortHomes === 'az') return cmpText(a.builder, b.builder) || cmpText(a.model, b.model) || cmpText(a.community, b.community) || a.id.localeCompare(b.id);
+      if (state.sortHomes === 'new') return addedTime(b) - addedTime(a) || b.id.localeCompare(a.id);
       var ia = STATUS_ORDER.indexOf(a.status), ib = STATUS_ORDER.indexOf(b.status);
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.id.localeCompare(b.id);
     });
+    var sortSel = h('select', { 'aria-label': 'Sort homes' }, [['az', 'A to Z by builder'], ['status', 'By status'], ['new', 'Newest added first']].map(function (o) {
+      return h('option', { value: o[0], selected: state.sortHomes === o[0] ? true : null }, o[1]);
+    }));
+    sortSel.value = state.sortHomes;
+    sortSel.addEventListener('change', function () { state.sortHomes = sortSel.value; render(); });
+    var sortPick = h('label', { class: 'fld filter' }, h('span', null, 'Sort'), sortSel);
     var quick = null;
     if (effectiveRole() === 'editor') {
       var links = ((state.planData && state.planData.links) || []).filter(function (l) { return /housing/i.test(l.group) && formUrl(l.url); });
@@ -1553,16 +1563,16 @@
     });
     return h('div', { class: 'stack' },
       h('div', null, h('h1', null, 'Housing'), h('p', { class: 'lede' }, 'Every home in your listing sheet, joined with tour notes and builder contacts by Home ID.')),
-      h('div', { class: 'chips' }, h('a', { class: 'btn small', href: '#/compare' }, 'Compare homes side by side'), h('a', { class: 'btn ghost small', href: '#/builders' }, 'Builders')),
       quick, canEditHome() ? addHomeForm() : null,
       h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by status' }, statuses.map(function (s) {
         return h('button', { class: 'chip', type: 'button', 'aria-pressed': String(state.filter === s), onclick: function () { state.filter = s; render(); } },
           s + ' (' + homes.filter(function (x) { return match(x, 'status') && (s === 'All' || x.status === s); }).length + ')');
       }).concat([h('button', { class: 'btn ghost small', type: 'button', onclick: collapseAllHomes }, 'Collapse all')])),
-      h('div', { class: 'filters' }, pickList('Builder', 'fBuilder', 'All builders', builderList, 'builder'), pickList('City', 'fCity', 'All cities', cityList, 'city'),
+      h('div', { class: 'filters' }, pickList('Builder', 'fBuilder', 'All builders', builderList, 'builder'), pickList('City', 'fCity', 'All cities', cityList, 'city'), sortPick,
         h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by tour' }, tourChips),
         anyFilter ? h('button', { class: 'btn ghost small', type: 'button', onclick: function () { state.filter = 'All'; state.fBuilder = 'All'; state.fCity = 'All'; state.fTour = 'All'; render(); } }, 'Clear filters') : null),
       h('p', { class: 'muted small' }, 'The status filter shows where each home stands now. A home you toured and rejected is counted under Rejected. The tour filter shows which homes have been toured, whatever their status.'),
+      h('div', { class: 'chips' }, h('a', { class: 'btn small', href: '#/compare' }, 'Compare homes side by side'), h('a', { class: 'btn ghost small', href: '#/builders' }, 'Builders')),
       shown.length ? h('div', { class: 'homes' }, shown.map(homeCard)) : h('p', { class: 'muted' }, 'No homes match these filters.')
     );
   }
