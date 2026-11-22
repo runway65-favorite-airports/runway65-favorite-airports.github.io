@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.31.0
+- The homes on the Housing page are now listed alphabetically by builder, then plan and community. A new Sort box beside the City filter lets you switch to the old order (by status, then Home ID) or to newest added first. The choice lasts until you reload the page.
+
+## 0.30.1
+- The Compare homes side by side and Builders buttons on the Housing page now sit below the filters and their explanation, just above the list of homes, instead of at the top of the page.
+
 ## 0.30.0
 - New: a links row at the top of each expanded home card and at the top of the tour page: Open listing, Redfin (from the Redfin URL column), Directions (a Google Maps link built from the sales center address, or the home's address if there is none), Call (from the Tel. # column, dials from a phone) and Email (shown only when the Home Listing tab has a Contact Email column). The Open listing button no longer sits at the bottom of the card.
 - Only https links and well-formed phone numbers and email addresses are turned into links.
