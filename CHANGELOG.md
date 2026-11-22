@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.32.0
+- New: Cities page, read from an optional Cities tab in the home-search sheet (headers: City, State, County, Location ID, Property tax rate, Median home price, Hospital access, Hospital note, Crime, Crime note, Climate risk, Climate note, Diversity, Diversity note, Notes, Last checked, Sources). One expandable card per city with its details and your homes there (each opens its card on Housing), sorted by number of open (not rejected) homes.
+- New: Compare cities. Pick two or three cities and see them side by side: tax rate and the yearly tax on a $500,000 home, median price, hospital access, crime, climate, diversity, how many of your homes are open or rejected there, and the price range of the open ones. A button picks the cities with the most open (not rejected) homes.
+- A Cities button on the Housing page, and cities are included in search.
+- Homes are matched to cities by the city name (or the Location ID) in the Home Listing tab.
+
 ## 0.31.0
 - The homes on the Housing page are now listed alphabetically by builder, then plan and community. A new Sort box beside the City filter lets you switch to the old order (by status, then Home ID) or to newest added first. The choice lasts until you reload the page.
 

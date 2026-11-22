@@ -1,4 +1,4 @@
-/* Runway v0.31.0.
+/* Runway v0.32.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.31.0';
+  var APP_VERSION = '0.32.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var DRAFT_KEY = 'runway.tourdrafts'; // half-finished tours, kept on this device only
@@ -25,7 +25,7 @@
     token: null, expires: 0, user: null, sheet: loadStore(HOME_KEY), plan: loadStore(PLAN_KEY),
     role: null, planRole: null, data: null, planData: null, planError: null,
     loadedAt: null, busy: false, error: null, saving: false, notice: null, drafts: loadDrafts(), openForms: {}, tourRoom: {}, routeArg: '',
-    route: 'overview', openHomes: {}, openReq: {}, compareIds: null, compareDiff: false, filter: 'All', fBuilder: 'All', fCity: 'All', fTour: 'All', query: '', sortHomes: 'az', beforeSearch: '', lastRoute: '', scrollTo: '', scrollBuilder: '', openBuilders: {}, fVet: 'All', compareBuilders: [], taskStream: 'All', showDone: false, needSignIn: true
+    route: 'overview', openHomes: {}, openReq: {}, compareIds: null, compareDiff: false, filter: 'All', fBuilder: 'All', fCity: 'All', fTour: 'All', query: '', compareCities: [], sortHomes: 'az', beforeSearch: '', lastRoute: '', scrollTo: '', scrollBuilder: '', openBuilders: {}, fVet: 'All', compareBuilders: [], taskStream: 'All', showDone: false, needSignIn: true
   };
 
   var app = document.getElementById('app');
@@ -224,6 +224,25 @@
         notes: r['Notes'] || '', checked: r['Last checked'] || '', sources: r['Sources'] || '', ask: r['Ask at the visit'] || '', priority: r['Trip priority'] || '' });
     });
     return out;
+  }
+  function buildCities(rows) {
+    var out = { has: false, list: [] };
+    if (!rows) return out;
+    out.has = !!(rows.head && rows.head.length);
+    rows.forEach(function (r) {
+      var name = r['City'] || r['Location'];
+      if (!name) return;
+      var rate = parseFloat(String(r['Property tax rate'] || '').replace('%', ''));
+      out.list.push({ name: name, state: r['State'] || '', county: r['County'] || '', id: r['Location ID'] || r['ID'] || '', rate: isNaN(rate) ? null : rate / 100, rateText: r['Property tax rate'] || '',
+        median: num(r['Median home price']), hospital: r['Hospital access'] || '', hospitalNote: r['Hospital note'] || '', crime: r['Crime'] || '', crimeNote: r['Crime note'] || '',
+        climate: r['Climate risk'] || '', climateNote: r['Climate note'] || '', diversity: r['Diversity'] || '', diversityNote: r['Diversity note'] || '',
+        notes: r['Notes'] || '', checked: r['Last checked'] || '', sources: r['Sources'] || '' });
+    });
+    return out;
+  }
+  function homesInCity(c) {
+    var k1 = normKey(c.name), k2 = normKey(c.id);
+    return state.data.homes.filter(function (x) { var k = normKey(x.city); return k && (k === k1 || (k2 && k === k2)); });
   }
   function builderFor(x) {
     if (!state.data || !state.data.builders || !x || !x.builder) return null;
@@ -453,9 +472,14 @@
             .then(function (c) { by.builders = table(c.values); })
             .catch(function () { by.builders = null; });
         })
+        .then(function () {
+          return api('https://sheets.googleapis.com/v4/spreadsheets/' + id + '/values/' + enc("'Cities'") + '?valueRenderOption=FORMATTED_VALUE')
+            .then(function (c) { by.cities = table(c.values); })
+            .catch(function () { by.cities = null; });
+        })
         .then(function () { return by; });
     }).then(function (by) {
-      state.data = { homes: buildHomes(by), tours: by.tours || [], contacts: by.contacts || [], docs: by.docs, listingHead: (by.listing && by.listing.head) || [], docsHead: (by.docs && by.docs.head) || [], listingRows: by.listing || [], tourHead: (by.tours && by.tours.head) || [], checks: buildChecks(by.checks), plans: buildPlans(by.plans), builders: buildBuilders(by.builders), contactsHead: (by.contacts && by.contacts.head) || [] };
+      state.data = { homes: buildHomes(by), tours: by.tours || [], contacts: by.contacts || [], docs: by.docs, listingHead: (by.listing && by.listing.head) || [], docsHead: (by.docs && by.docs.head) || [], listingRows: by.listing || [], tourHead: (by.tours && by.tours.head) || [], checks: buildChecks(by.checks), plans: buildPlans(by.plans), builders: buildBuilders(by.builders), cities: buildCities(by.cities), contactsHead: (by.contacts && by.contacts.head) || [] };
     });
   }
 
@@ -1572,7 +1596,7 @@
         h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by tour' }, tourChips),
         anyFilter ? h('button', { class: 'btn ghost small', type: 'button', onclick: function () { state.filter = 'All'; state.fBuilder = 'All'; state.fCity = 'All'; state.fTour = 'All'; render(); } }, 'Clear filters') : null),
       h('p', { class: 'muted small' }, 'The status filter shows where each home stands now. A home you toured and rejected is counted under Rejected. The tour filter shows which homes have been toured, whatever their status.'),
-      h('div', { class: 'chips' }, h('a', { class: 'btn small', href: '#/compare' }, 'Compare homes side by side'), h('a', { class: 'btn ghost small', href: '#/builders' }, 'Builders')),
+      h('div', { class: 'chips' }, h('a', { class: 'btn small', href: '#/compare' }, 'Compare homes side by side'), h('a', { class: 'btn ghost small', href: '#/builders' }, 'Builders'), h('a', { class: 'btn ghost small', href: '#/cities' }, 'Cities')),
       shown.length ? h('div', { class: 'homes' }, shown.map(homeCard)) : h('p', { class: 'muted' }, 'No homes match these filters.')
     );
   }
@@ -1645,7 +1669,7 @@
   }
 
   /* ----- Search ----- */
-  var SEARCH_GROUPS = ['Homes', 'Builders', 'Tours', 'Contacts', 'Planned tours', 'Tasks', 'Decisions', 'Journal', 'Documents', 'Requirements'];
+  var SEARCH_GROUPS = ['Homes', 'Builders', 'Cities', 'Tours', 'Contacts', 'Planned tours', 'Tasks', 'Decisions', 'Journal', 'Documents', 'Requirements'];
   function rawFields(r, skip) {
     var out = [];
     Object.keys(r).forEach(function (k) { if (k && k !== '_row' && skip.indexOf(k) < 0 && String(r[k] || '').trim() !== '') out.push([k, String(r[k])]); });
@@ -1685,6 +1709,10 @@
     ((d.builders && d.builders.list) || []).forEach(function (b) {
       items.push({ kind: 'Builders', title: b.name, sub: [b.vetting ? 'Vetting: ' + b.vetting : '', b.priority].filter(Boolean).join(' | '), go: function () { go('builders/' + enc(b.name)); },
         fields: [['Ratings', b.ratings], ['Warranty', b.warranty], ['Ask at the visit', b.ask], ['Notes', b.notes], ['Division', b.division], ['GuildQuality', b.gq]].filter(function (f) { return f[1]; }) });
+    });
+    ((d.cities && d.cities.list) || []).forEach(function (c) {
+      items.push({ kind: 'Cities', title: c.name + (c.state ? ', ' + c.state : ''), sub: [c.county, c.rateText ? 'Tax ' + c.rateText : ''].filter(Boolean).join(' | '), go: function () { go('cities'); },
+        fields: [['Hospital', c.hospitalNote], ['Crime', c.crimeNote], ['Climate', c.climateNote], ['Diversity', c.diversityNote], ['Notes', c.notes]].filter(function (f) { return f[1]; }) });
     });
     if (P) {
       P.tasks.forEach(function (t) {
@@ -1869,6 +1897,74 @@
     });
     return h('div', { class: 'stack' }, head, cmpCard, cmp, h('section', { class: 'card stack' }, chips, h('p', { class: 'muted small' }, 'Sorted by trip priority. Vetting status is set in the sheet: Approved, Pending or Concern.')),
       cards.length ? cards : h('p', { class: 'muted' }, 'No builders match.'));
+  }
+
+  /* ----- Cities ----- */
+  function cityLevelTag(v) {
+    var l = String(v || '').toLowerCase();
+    var bad = l === 'elevated' || l === 'high';
+    return h('span', { class: 'tag' + (l === 'strong' || l === 'low' ? ' active' : bad ? ' warn' : '') }, v);
+  }
+  function viewCities() {
+    var head = h('div', null, h('h1', null, 'Cities'), h('p', { class: 'lede' }, 'Compare the places your homes are in: tax, hospitals, crime, weather and more, from the Cities tab in the home-search sheet.'));
+    var C = state.data.cities;
+    if (!C || !C.has) return h('div', { class: 'stack' }, head, h('section', { class: 'card stack' }, h('h2', null, 'Add a Cities tab'),
+      h('p', null, 'In the home-search sheet, add a tab named "Cities" with these headers in row 1: City, State, County, Location ID, Property tax rate, Median home price, Hospital access, Hospital note, Crime, Crime note, Climate risk, Climate note, Diversity, Diversity note, Notes, Last checked, Sources.'),
+      h('p', { class: 'muted' }, 'Then choose Refresh. The Retirement Research workbook has a Locations tab with the same kind of data that you can copy from.')));
+    var ordered = C.list.slice().map(function (c) { var hs = homesInCity(c); return { c: c, homes: hs, open: hs.filter(function (x) { return x.status !== 'Rejected'; }).length }; }).sort(function (a, b) { return b.open - a.open || b.homes.length - a.homes.length || a.c.name.localeCompare(b.c.name); });
+    var picks = (state.compareCities || []).filter(function (n) { return C.list.some(function (c) { return c.name === n; }); });
+    function togglePick(n) {
+      var cur = picks.slice(), i = cur.indexOf(n);
+      if (i >= 0) cur.splice(i, 1); else { if (cur.length >= 3) { toast('Compare up to three cities at a time.', true); return; } cur.push(n); }
+      state.compareCities = cur; render();
+    }
+    var chosen = picks.map(function (n) { return ordered.filter(function (o) { return o.c.name === n; })[0]; });
+    var cmp = null;
+    if (chosen.length >= 2) {
+      var rows = [];
+      var line = function (label, f) { rows.push(h('tr', null, h('th', { scope: 'row' }, label), chosen.map(function (o) { return h('td', null, f(o)); }))); };
+      var live = function (o) { return o.homes.filter(function (x) { return x.status !== 'Rejected'; }); };
+      line('County', function (o) { return [o.c.county, o.c.state].filter(Boolean).join(', '); });
+      line('Property tax rate', function (o) { return o.c.rateText; });
+      line('Tax on a $500,000 home', function (o) { return o.c.rate === null ? '' : money(Math.round(o.c.rate * 500000)) + ' a year'; });
+      line('Median home price', function (o) { return o.c.median === null ? '' : money(o.c.median); });
+      line('Hospital access', function (o) { return o.c.hospital ? [cityLevelTag(o.c.hospital), ' ', o.c.hospitalNote] : o.c.hospitalNote; });
+      line('Crime', function (o) { return o.c.crime ? [cityLevelTag(o.c.crime), ' ', o.c.crimeNote] : o.c.crimeNote; });
+      line('Climate risk', function (o) { return o.c.climate ? [cityLevelTag(o.c.climate), ' ', o.c.climateNote] : o.c.climateNote; });
+      line('Diversity', function (o) { return o.c.diversity ? [o.c.diversity, ' ', o.c.diversityNote] : o.c.diversityNote; });
+      line('Your homes here', function (o) { var l = live(o); return l.length + ' open' + (o.homes.length > l.length ? ', ' + (o.homes.length - l.length) + ' rejected' : ''); });
+      line('Price range of open homes', function (o) { var p = live(o).map(function (x) { return x.price; }).filter(function (v) { return v; }); return p.length ? money(Math.min.apply(null, p)) + ' to ' + money(Math.max.apply(null, p)) : ''; });
+      line('Notes', function (o) { return o.c.notes; });
+      line('Last checked', function (o) { return o.c.checked; });
+      cmp = h('section', { class: 'card scroll' }, h('table', { class: 'cmp' },
+        h('thead', null, h('tr', null, h('th', { scope: 'col' }, ''), chosen.map(function (o) { return h('th', { scope: 'col' }, o.c.name); }))), h('tbody', null, rows)));
+    }
+    var firstPicks = ordered.filter(function (o) { return o.open; }).slice(0, 3).map(function (o) { return o.c.name; });
+    var cmpCard = h('section', { class: 'card stack' }, h('h2', null, 'Compare cities'),
+      h('p', { class: 'muted small' }, picks.length === 1 ? 'Pick one more to see them side by side.' : 'Pick two or three cities to see them side by side.'),
+      h('div', { class: 'chips', role: 'group', 'aria-label': 'Cities to compare' }, ordered.map(function (o) {
+        return h('button', { class: 'chip', type: 'button', 'aria-pressed': String(picks.indexOf(o.c.name) >= 0), onclick: function () { togglePick(o.c.name); } }, o.c.name + ' (' + o.homes.length + ')');
+      })),
+      h('div', { class: 'chips' }, firstPicks.length >= 2 ? h('button', { class: 'btn ghost small', type: 'button', onclick: function () { state.compareCities = firstPicks; render(); } }, 'Pick the cities with the most open homes') : null,
+        picks.length ? h('button', { class: 'btn ghost small', type: 'button', onclick: function () { state.compareCities = []; render(); } }, 'Clear') : null));
+    function row(label, val) { return val ? h('div', { class: 'brow' }, h('div', { class: 'muted small' }, label), h('div', null, val)) : null; }
+    var cards = ordered.map(function (o) {
+      var c = o.c, counts = {};
+      o.homes.forEach(function (x) { counts[x.status] = (counts[x.status] || 0) + 1; });
+      var summary = Object.keys(counts).map(function (k) { return counts[k] + ' ' + k; }).join(', ');
+      return h('details', { class: 'card builder', 'data-city': c.name },
+        h('summary', null, h('div', { class: 'chips', style: 'gap:8px;align-items:center' }, h('strong', null, c.name + (c.state ? ', ' + c.state : '')), h('span', { class: 'tag' }, o.homes.length + (o.homes.length === 1 ? ' home' : ' homes'))),
+          h('div', { class: 'muted small' }, [c.rateText ? 'Tax ' + c.rateText : '', c.median !== null ? 'Median ' + money(c.median) : '', summary].filter(Boolean).join(' | '))),
+        h('div', { class: 'stack', style: 'margin-top:12px' },
+          row('County', c.county), row('Property tax rate', c.rateText), row('Median home price', c.median === null ? '' : money(c.median)),
+          row('Hospital access', c.hospital ? [cityLevelTag(c.hospital), ' ', c.hospitalNote] : c.hospitalNote), row('Crime', c.crime ? [cityLevelTag(c.crime), ' ', c.crimeNote] : c.crimeNote),
+          row('Climate risk', c.climate ? [cityLevelTag(c.climate), ' ', c.climateNote] : c.climateNote), row('Diversity', c.diversity ? [c.diversity, ' ', c.diversityNote] : c.diversityNote),
+          row('Notes', c.notes), row('Last checked', c.checked), row('Sources', c.sources),
+          o.homes.length ? h('div', null, h('div', { class: 'muted small' }, 'Your homes here'), h('div', { class: 'chips' }, o.homes.map(function (x) {
+            return h('button', { class: 'chip', type: 'button', onclick: function () { openHome(x.id); } }, homeName(x) + ' | ' + x.status);
+          }))) : null));
+    });
+    return h('div', { class: 'stack' }, head, cmpCard, cmp, cards);
   }
 
   /* ----- Compare ----- */
@@ -2146,7 +2242,7 @@
   /* ---------- shell ---------- */
   var ROUTES = {
     overview: ['Overview', viewOverview], tasks: ['Tasks', viewTasks], decisions: ['Decisions', viewDecisions],
-    housing: ['Housing', viewHousing], search: ['Search', viewSearch], builders: ['Builders', viewBuilders], tour: ['Log a tour', viewTour], compare: ['Compare homes', viewCompare], requirements: ['Requirements', viewRequirements], chronology: ['Chronology', viewChronology], journal: ['Journal', viewJournal], documents: ['Documents', viewDocuments], sheets: ['Sheets', viewSheets]
+    housing: ['Housing', viewHousing], search: ['Search', viewSearch], builders: ['Builders', viewBuilders], cities: ['Cities', viewCities], tour: ['Log a tour', viewTour], compare: ['Compare homes', viewCompare], requirements: ['Requirements', viewRequirements], chronology: ['Chronology', viewChronology], journal: ['Journal', viewJournal], documents: ['Documents', viewDocuments], sheets: ['Sheets', viewSheets]
   };
   var NAV = ['overview', 'tasks', 'decisions', 'housing', 'requirements', 'chronology', 'journal', 'documents'];
 
