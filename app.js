@@ -1,4 +1,4 @@
-/* Runway v0.32.0.
+/* Runway v0.33.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.32.0';
+  var APP_VERSION = '0.33.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var DRAFT_KEY = 'runway.tourdrafts'; // half-finished tours, kept on this device only
@@ -289,7 +289,7 @@
       if (!r['Home ID']) return;
       var st = String(r['Status'] || '').trim().toLowerCase();
       out.list.push({ row: r._row, id: r['Home ID'], date: parseDate(r['Planned date']), dateText: r['Planned date'] || '', time: String(r['Time'] || '').trim(),
-        note: r['Note'] || '', status: st === 'done' ? 'Done' : (st === 'cancelled' || st === 'canceled') ? 'Cancelled' : 'Planned', by: r['Planned by'] || '' });
+        note: r['Note'] || '', rawStatus: String(r['Status'] || '').trim(), status: st === 'done' ? 'Done' : (st === 'cancelled' || st === 'canceled') ? 'Cancelled' : 'Planned', by: r['Planned by'] || '' });
     });
     return out;
   }
@@ -327,25 +327,32 @@
   function tourDetails(x, p) {
     return [[x.contact, x.phone].filter(Boolean).length ? 'Builder contact: ' + [x.contact, x.phone].filter(Boolean).join(', ') : '', p.note].filter(Boolean).join('\n');
   }
+  // Every home in this search is in Tennessee, so tour times are Central time wherever the person is sitting.
+  var TOUR_TZ = 'America/Chicago';
   function calendarLink(x, p) {
     var ps = planStart(p); if (!ps) return null;
     var slot = tourSlot(ps), loc = x.address || [x.community, x.city].filter(Boolean).join(', ');
     return 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=' + enc('Tour: ' + homeName(x)) + '&dates=' + slot.a + '/' + slot.b +
-      '&details=' + enc(tourDetails(x, p)) + '&location=' + enc(loc);
+      '&details=' + enc(tourDetails(x, p)) + '&location=' + enc(loc) + (slot.allDay ? '' : '&ctz=' + enc(TOUR_TZ));
   }
   function icsText(t) { return String(t).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n'); }
-  function downloadIcs(x, p) {
-    var ps = planStart(p); if (!ps) return;
+  function icsEvent(x, p) {
+    var ps = planStart(p); if (!ps) return [];
     var slot = tourSlot(ps), loc = x.address || [x.community, x.city].filter(Boolean).join(', ');
-    var lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Runway//Tour//EN', 'BEGIN:VEVENT', 'UID:tour-' + x.id + '-' + slot.a + '@runway',
-      'DTSTAMP:' + ymdhms(new Date()), slot.allDay ? 'DTSTART;VALUE=DATE:' + slot.a : 'DTSTART:' + slot.a, slot.allDay ? 'DTEND;VALUE=DATE:' + slot.b : 'DTEND:' + slot.b,
-      'SUMMARY:' + icsText('Tour: ' + homeName(x)), 'LOCATION:' + icsText(loc), 'DESCRIPTION:' + icsText(tourDetails(x, p)), 'END:VEVENT', 'END:VCALENDAR'];
+    return ['BEGIN:VEVENT', 'UID:tour-' + x.id + '-' + slot.a + '@runway', 'DTSTAMP:' + ymdhms(new Date()),
+      slot.allDay ? 'DTSTART;VALUE=DATE:' + slot.a : 'DTSTART;TZID=' + TOUR_TZ + ':' + slot.a, slot.allDay ? 'DTEND;VALUE=DATE:' + slot.b : 'DTEND;TZID=' + TOUR_TZ + ':' + slot.b,
+      'SUMMARY:' + icsText('Tour: ' + homeName(x)), 'LOCATION:' + icsText(loc), 'DESCRIPTION:' + icsText(tourDetails(x, p)), 'END:VEVENT'];
+  }
+  function saveIcs(events, filename) {
+    if (!events.length) { toast('Nothing to put in a calendar file.', true); return; }
+    var lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Runway//Tour//EN'].concat(events, ['END:VCALENDAR']);
     try {
       var url = URL.createObjectURL(new Blob([lines.join('\r\n')], { type: 'text/calendar' }));
-      var a = document.createElement('a'); a.href = url; a.download = 'tour-' + x.id + '.ics';
+      var a = document.createElement('a'); a.href = url; a.download = filename;
       document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
     } catch (e) { toast('Could not create the calendar file on this device.', true); }
   }
+  function downloadIcs(x, p) { saveIcs(icsEvent(x, p), 'tour-' + x.id + '.ics'); }
   function plannedFor(id) {
     return state.data.plans.list.filter(function (p) { return p.id === id && p.status === 'Planned'; }).sort(function (a, b) { return (a.date ? a.date.getTime() : 0) - (b.date ? b.date.getTime() : 0); });
   }
@@ -1383,7 +1390,7 @@
     var all = d.plans.list.filter(function (p) { return p.status === 'Planned' && p.date && homes[p.id]; }).sort(function (a, b) { return a.date - b.date; });
     var up = all.filter(function (p) { return p.date >= today; }).slice(0, 5), late = all.filter(function (p) { return p.date < today; });
     if (!up.length && !late.length) return null;
-    return h('section', { class: 'card stack' }, h('h2', null, 'Upcoming tours'),
+    return h('section', { class: 'card stack' }, h('h2', null, 'Upcoming tours'), h('a', { class: 'small', href: '#/tours' }, 'See the whole plan, day by day'),
       up.length ? h('ul', { class: 'list' }, up.map(function (p) {
         var x = homes[p.id], link = calendarLink(x, p);
         return h('li', null, h('strong', null, planWhen(p)), h('div', null, homeName(x)),
@@ -1699,7 +1706,7 @@
         fields: rawFields(r, ['Timestamp', 'Home ID']) });
     });
     (d.plans && d.plans.list || []).filter(function (p) { return p.status === 'Planned'; }).forEach(function (p) {
-      items.push({ kind: 'Planned tours', title: 'Planned tour: ' + (names[p.id] || p.id), sub: planWhen(p), go: function () { openHome(p.id); }, fields: [['Note', p.note], ['When', planWhen(p)]].filter(function (f) { return f[1]; }) });
+      items.push({ kind: 'Planned tours', title: 'Planned tour: ' + (names[p.id] || p.id), sub: planWhen(p), go: function () { go('tours'); }, fields: [['Note', p.note], ['When', planWhen(p)]].filter(function (f) { return f[1]; }) });
     });
     (d.docs || []).forEach(function (r) {
       var url = r['URL'] || '';
@@ -1897,6 +1904,55 @@
     });
     return h('div', { class: 'stack' }, head, cmpCard, cmp, h('section', { class: 'card stack' }, chips, h('p', { class: 'muted small' }, 'Sorted by trip priority. Vetting status is set in the sheet: Approved, Pending or Concern.')),
       cards.length ? cards : h('p', { class: 'muted' }, 'No builders match.'));
+  }
+
+  /* ----- Tours ----- */
+  function viewTours() {
+    var d = state.data, today = startOfToday(), homes = {};
+    d.homes.forEach(function (x) { homes[x.id] = x; });
+    var head = h('div', null, h('h1', null, 'Tours'), h('p', { class: 'lede' }, 'Your planned house visits, day by day. Times are Central time. Change a plan from the home\'s card or in the Tour Plans tab of the sheet.'));
+    var all = d.plans.list.filter(function (p) { return p.status === 'Planned' && p.date && homes[p.id]; }).sort(function (a, b) {
+      var ca = parseClock(a.time), cb = parseClock(b.time);
+      return a.date - b.date || (ca ? ca.h * 60 + ca.m : 0) - (cb ? cb.h * 60 + cb.m : 0);
+    });
+    if (!all.length) return h('div', { class: 'stack' }, head, h('section', { class: 'card stack' }, h('h2', null, 'No tours planned yet'),
+      h('p', { class: 'muted' }, 'Open a home on the Housing page and use Plan a tour, or add rows to the Tour Plans tab of the sheet.')));
+    var late = all.filter(function (p) { return p.date < today; }), upcoming = all.filter(function (p) { return p.date >= today; });
+    var days = [], byDay = {};
+    upcoming.forEach(function (p) { var k = p.dateText; if (!byDay[k]) { byDay[k] = { date: p.date, items: [] }; days.push(byDay[k]); } byDay[k].items.push(p); });
+    function statusTag(p) {
+      var r = String(p.rawStatus || '').toLowerCase();
+      return h('span', { class: 'tag' + (r === 'confirmed' ? ' active' : r === 'requested' ? ' warn' : '') }, r === 'confirmed' ? 'Confirmed' : r === 'requested' ? 'Requested' : 'Planned');
+    }
+    function item(p) {
+      var x = homes[p.id], link = calendarLink(x, p), where = String(x.salesAddr || x.address || '').trim();
+      var digits = String(x.phone || '').replace(/[^0-9+]/g, '');
+      var actions = [];
+      actions.push(h('button', { class: 'btn ghost small', type: 'button', onclick: function () { openHome(x.id); } }, 'Open home'));
+      if (where) actions.push(rawLink('btn ghost small', 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(where), 'Directions', where));
+      if (/^\+?[0-9]{7,15}$/.test(digits)) actions.push(rawLink('btn ghost small', 'tel:' + digits, 'Call' + (x.contact ? ' ' + x.contact.split(/\s+/)[0] : '')));
+      if (link) actions.push(rawLink('btn ghost small', link, 'Add to Google Calendar'));
+      if (canEditHome() && (d.tourHead || []).length) actions.push(rawLink('btn small', '#/tour/' + x.id, 'Log a tour'));
+      return h('li', { class: 'result' },
+        h('div', { class: 'chips', style: 'gap:8px;align-items:center' }, h('strong', null, p.time ? clockText(p.time) : 'Time not set'), h('span', null, homeName(x)), statusTag(p), tagFor(x.status)),
+        h('div', { class: 'muted small' }, [x.community, x.city].filter(Boolean).join(', ')),
+        p.note ? h('div', { class: 'small' }, p.note) : null,
+        h('div', { class: 'chips linkrow' }, actions));
+    }
+    var dayCards = days.map(function (dd) {
+      var cities = []; dd.items.forEach(function (p) { var c = homes[p.id].city; if (c && cities.indexOf(c) < 0) cities.push(c); });
+      var label = dd.date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+      return h('section', { class: 'card stack' }, h('h2', null, label), h('p', { class: 'muted small' }, dd.items.length + (dd.items.length === 1 ? ' tour' : ' tours') + (cities.length ? ' | ' + cities.join(', ') : '')),
+        h('ul', { class: 'results' }, dd.items.map(item)));
+    });
+    var actionsTop = h('div', { class: 'chips' },
+      h('button', { class: 'btn small', type: 'button', onclick: function () {
+        var ev = []; upcoming.forEach(function (p) { ev = ev.concat(icsEvent(homes[p.id], p)); }); saveIcs(ev, 'runway-tours.ics');
+      } }, 'Download all as a calendar file (.ics)'),
+      h('button', { class: 'btn ghost small', type: 'button', onclick: function () { try { window.print(); } catch (e) { /* ignore */ } } }, 'Print'));
+    var lateCard = late.length ? h('section', { class: 'card stack' }, h('h2', null, 'Planned but not yet logged'),
+      h('ul', { class: 'results' }, late.map(item))) : null;
+    return h('div', { class: 'stack' }, head, upcoming.length ? actionsTop : null, lateCard, dayCards.length ? dayCards : h('p', { class: 'muted' }, 'No upcoming tours.'));
   }
 
   /* ----- Cities ----- */
@@ -2242,9 +2298,9 @@
   /* ---------- shell ---------- */
   var ROUTES = {
     overview: ['Overview', viewOverview], tasks: ['Tasks', viewTasks], decisions: ['Decisions', viewDecisions],
-    housing: ['Housing', viewHousing], search: ['Search', viewSearch], builders: ['Builders', viewBuilders], cities: ['Cities', viewCities], tour: ['Log a tour', viewTour], compare: ['Compare homes', viewCompare], requirements: ['Requirements', viewRequirements], chronology: ['Chronology', viewChronology], journal: ['Journal', viewJournal], documents: ['Documents', viewDocuments], sheets: ['Sheets', viewSheets]
+    housing: ['Housing', viewHousing], search: ['Search', viewSearch], builders: ['Builders', viewBuilders], cities: ['Cities', viewCities], tours: ['Tours', viewTours], tour: ['Log a tour', viewTour], compare: ['Compare homes', viewCompare], requirements: ['Requirements', viewRequirements], chronology: ['Chronology', viewChronology], journal: ['Journal', viewJournal], documents: ['Documents', viewDocuments], sheets: ['Sheets', viewSheets]
   };
-  var NAV = ['overview', 'tasks', 'decisions', 'housing', 'requirements', 'chronology', 'journal', 'documents'];
+  var NAV = ['overview', 'tasks', 'decisions', 'housing', 'tours', 'requirements', 'chronology', 'journal', 'documents'];
 
   function go(r) { location.hash = '#/' + r; }
   function readRoute() {

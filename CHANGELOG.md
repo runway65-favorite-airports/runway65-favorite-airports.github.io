@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.33.0
+- New: a Tours page in the top menu (after Housing). It lists every planned tour day by day with the time, home, status (Requested, Planned or Confirmed, as typed in the Tour Plans tab), notes and the buttons you need on the road: Open home, Directions, Call, Add to Google Calendar and Log a tour. Tours whose date has passed and that are not yet logged appear in their own list. A button downloads the whole plan as one calendar file, and another prints it.
+- Tour times are now treated as Central time (Tennessee) in the Google Calendar buttons and the calendar files, so they show at the right hour even if your calendar is set to Eastern.
+- The Overview's Upcoming tours card links to the new page, and a planned tour found by search opens the Tours page.
+
 ## 0.32.0
 - New: Cities page, read from an optional Cities tab in the home-search sheet (headers: City, State, County, Location ID, Property tax rate, Median home price, Hospital access, Hospital note, Crime, Crime note, Climate risk, Climate note, Diversity, Diversity note, Notes, Last checked, Sources). One expandable card per city with its details and your homes there (each opens its card on Housing), sorted by number of open (not rejected) homes.
 - New: Compare cities. Pick two or three cities and see them side by side: tax rate and the yearly tax on a $500,000 home, median price, hospital access, crime, climate, diversity, how many of your homes are open or rejected there, and the price range of the open ones. A button picks the cities with the most open (not rejected) homes.
