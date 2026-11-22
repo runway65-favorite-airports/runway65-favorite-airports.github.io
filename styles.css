@@ -223,3 +223,7 @@ details.home[open]>summary::after{top:28px;transform:rotate(-135deg)}
 details.builder>summary{cursor:pointer;list-style:none;display:flex;flex-direction:column;gap:6px;position:relative;padding-right:40px}
 details.builder>summary::after{content:"";position:absolute;right:6px;top:8px;width:10px;height:10px;border-right:2px solid var(--teal);border-bottom:2px solid var(--teal);transform:rotate(45deg);transition:transform .15s}
 details.builder[open]>summary::after{top:12px;transform:rotate(-135deg)}
+
+/* v0.30.0: links row */
+.linkrow{margin-bottom:4px}
+.linkrow a{text-decoration:none}

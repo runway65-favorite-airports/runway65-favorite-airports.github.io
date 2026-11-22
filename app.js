@@ -1,4 +1,4 @@
-/* Runway v0.29.1.
+/* Runway v0.30.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.29.1';
+  var APP_VERSION = '0.30.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var DRAFT_KEY = 'runway.tourdrafts'; // half-finished tours, kept on this device only
@@ -236,6 +236,25 @@
     return h('span', { class: 'tag' + (b.vetting === 'Approved' ? ' active' : b.vetting === 'Concern' ? ' warn' : '') }, (label === undefined ? 'Builder: ' : label) + (b.vetting || 'Not rated'));
   }
   function shortText(t, n) { t = String(t || ''); return t.length > n ? t.slice(0, n).replace(/\s+\S*$/, '') + '...' : t; }
+  function rawLink(cls, href, text, title) {
+    var a = h('a', { class: cls }, text);
+    a.setAttribute('href', href);
+    if (/^https?:/i.test(href)) { a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer'); }
+    if (title) a.setAttribute('title', title);
+    return a;
+  }
+  function homeLinkRow(x) {
+    var out = [], https = function (u) { return /^https:\/\//i.test(String(u || '').trim()); };
+    if (https(x.url)) out.push(rawLink('btn small', String(x.url).trim(), 'Open listing'));
+    if (https(x.redfin)) out.push(rawLink('btn ghost small', String(x.redfin).trim(), 'Redfin'));
+    var where = String(x.salesAddr || x.address || '').trim();
+    if (where) out.push(rawLink('btn ghost small', 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(where), 'Directions', where));
+    var digits = String(x.phone || '').replace(/[^0-9+]/g, '');
+    if (/^\+?[0-9]{7,15}$/.test(digits)) out.push(rawLink('btn ghost small', 'tel:' + digits, 'Call' + (x.contact ? ' ' + x.contact.split(/\s+/)[0] : '')));
+    var mail = String(x.email || '').trim();
+    if (/^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+$/.test(mail)) out.push(rawLink('btn ghost small', 'mailto:' + mail, 'Email' + (x.contact ? ' ' + x.contact.split(/\s+/)[0] : '')));
+    return out.length ? h('div', { class: 'chips linkrow' }, out) : null;
+  }
   function builderBox(x) {
     var b = builderFor(x); if (!b) return null;
     return h('div', { class: 'builderbox' },
@@ -358,7 +377,7 @@
       return {
         id: id, row: r._row, added: String(r['Timestamp'] || '').trim().split(' ')[0], beds: r['Bedrooms'] || '', baths: r['Baths'] || '', garage: r['Garage'] || '', builder: r['Builder'] || '', model: r['Model'] || '', community: r['Community'] || '', city: r['City'] || '',
         status: canonStatus(r['Status']), price: num(r['List Price']), upgrade: num(r['Upgrade Price']), sqft: num(r['Sq Ft']),
-        visit: r['Visit Date'] || '', reason: r['Rejected Reason'] || '', url: r['Listing URL'] || '', address: r['Address'] || '',
+        visit: r['Visit Date'] || '', reason: r['Rejected Reason'] || '', url: r['Listing URL'] || '', redfin: r['Redfin URL'] || '', salesAddr: r['Sales Center Address'] || '', email: r['Contact Email'] || '', address: r['Address'] || '',
         notes: r['Notes'] || '', contact: r['Contact'] || '', phone: r['Tel. #'] || '',
         tour: latestTour(tours[id] || []), contacts: contacts[id] || []
       };
@@ -1257,7 +1276,7 @@
         h('button', { class: 'btn ghost', type: 'button', onclick: discard }, 'Discard draft')));
     return h('div', { class: 'stack' },
       h('div', null, h('h1', null, homeName(x)), h('p', { class: 'lede' }, [x.community, x.city].filter(Boolean).join(', ') + '. Your answers are kept on this device as you go, until you save or discard.')),
-      back,
+      back, homeLinkRow(x),
       h('section', { class: 'card stack' },
         h('div', { class: 'tfield' }, h('div', { class: 'ttitle' }, 'Visit date'), date),
         h('div', { class: 'rooms', role: 'group', 'aria-label': 'Rooms' }, chips)),
@@ -1456,6 +1475,7 @@
         h('div', { class: 'chips' }, tagFor(x.status), x.added ? h('span', { class: 'tag' }, 'Added ' + x.added) : null, (function () { var b = builderFor(x); return b && b.vetting ? vetTag(b) : null; })(), (function () { var np = nextPlan(x.id); return np ? h('span', { class: 'tag warn' }, 'Tour planned ' + planWhen(np)) : null; })(), (function () { var m = reqSummary(x); return m ? h('span', { class: 'tag' + (m.mustFail ? ' warn' : '') }, m.yes + ' of ' + m.total + ' requirements met' + (m.no ? ', ' + m.no + ' not met' : '')) : null; })(), x.reason ? h('span', { class: 'tag' }, x.reason) : null, x.visit ? h('span', { class: 'tag' }, 'Toured ' + x.visit) : null)
       ),
       h('div', { class: 'body' },
+        homeLinkRow(x),
         h('dl', { class: 'kv' },
           fact('Address', x.address), fact('List price', priceText), fact('Square feet', x.sqft ? String(x.sqft) : ''),
           fact('Enclosed WC', t['Enclosed WC']), fact('HOA monthly', col(t, /^HOA Monthly/i)), fact('Decision', t['Decision']),
@@ -1477,7 +1497,7 @@
         tourStart(x),
         contactForm(x),
         statusEditor(x),
-        h('div', { class: 'chips' }, homeLinks(x), x.url ? h('a', { class: 'btn ghost small', href: x.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open listing') : null)
+        h('div', { class: 'chips' }, homeLinks(x))
       )
     );
   }

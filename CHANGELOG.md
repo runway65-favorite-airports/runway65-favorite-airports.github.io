@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.30.0
+- New: a links row at the top of each expanded home card and at the top of the tour page: Open listing, Redfin (from the Redfin URL column), Directions (a Google Maps link built from the sales center address, or the home's address if there is none), Call (from the Tel. # column, dials from a phone) and Email (shown only when the Home Listing tab has a Contact Email column). The Open listing button no longer sits at the bottom of the card.
+- Only https links and well-formed phone numbers and email addresses are turned into links.
+
 ## 0.29.1
 - Fixed: there was no way out of a search. A Close search button now appears in the search bar while you are on the results page, with a Close search and go back button on the results page itself. Both clear the box and return you to the page you searched from. Pressing Escape in the box does the same, and a Clear button appears when you have typed something on any other page.
 - The search box now empties by itself when you leave the results page, for example by opening a result or choosing a menu item.
