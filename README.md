@@ -1,6 +1,6 @@
 # Runway
 
-Version 0.33.0. Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents from two Google Sheets. People with edit access can check off tasks and add tasks, decisions and journal entries. People with edit access can also change a home's status and pick the reasons for a rejection.
+Version 0.34.1. Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents from two Google Sheets. People with edit access can check off tasks and add tasks, decisions and journal entries. People with edit access can also change a home's status and pick the reasons for a rejection.
 
 ## Before you upload
 
@@ -101,3 +101,7 @@ The site and its code are public. They contain no names, employer, family detail
 ## Google consent screen links
 
 In Google Auth Platform > Branding, set the home page to `https://runway65-favorite-airports.github.io/` and the privacy policy link to `https://runway65-favorite-airports.github.io/privacy.html`.
+
+## Rejecting a city
+
+On the Cities tab, add three optional headers: `Status`, `Reason` and `Rejected on`. Editors can reject or restore a city from its card on the Cities page (a reason is required). A city whose Status is `Rejected` moves into a collapsed Rejected cities section, drops out of Compare cities, and its homes are hidden from Housing and Compare homes until you choose "Show homes in rejected cities". No rows are deleted.

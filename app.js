@@ -1,4 +1,4 @@
-/* Runway v0.33.0.
+/* Runway v0.34.1.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.33.0';
+  var APP_VERSION = '0.34.1';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var DRAFT_KEY = 'runway.tourdrafts'; // half-finished tours, kept on this device only
@@ -25,7 +25,7 @@
     token: null, expires: 0, user: null, sheet: loadStore(HOME_KEY), plan: loadStore(PLAN_KEY),
     role: null, planRole: null, data: null, planData: null, planError: null,
     loadedAt: null, busy: false, error: null, saving: false, notice: null, drafts: loadDrafts(), openForms: {}, tourRoom: {}, routeArg: '',
-    route: 'overview', openHomes: {}, openReq: {}, compareIds: null, compareDiff: false, filter: 'All', fBuilder: 'All', fCity: 'All', fTour: 'All', query: '', compareCities: [], sortHomes: 'az', beforeSearch: '', lastRoute: '', scrollTo: '', scrollBuilder: '', openBuilders: {}, fVet: 'All', compareBuilders: [], taskStream: 'All', showDone: false, needSignIn: true
+    route: 'overview', openHomes: {}, openReq: {}, compareIds: null, compareDiff: false, filter: 'All', fBuilder: 'All', fCity: 'All', fTour: 'All', query: '', compareCities: [], showRejectedCities: false, sortHomes: 'az', beforeSearch: '', lastRoute: '', scrollTo: '', scrollBuilder: '', openBuilders: {}, fVet: 'All', compareBuilders: [], taskStream: 'All', showDone: false, needSignIn: true
   };
 
   var app = document.getElementById('app');
@@ -226,8 +226,9 @@
     return out;
   }
   function buildCities(rows) {
-    var out = { has: false, list: [] };
+    var out = { has: false, head: [], list: [] };
     if (!rows) return out;
+    out.head = rows.head || [];
     out.has = !!(rows.head && rows.head.length);
     rows.forEach(function (r) {
       var name = r['City'] || r['Location'];
@@ -236,13 +237,68 @@
       out.list.push({ name: name, state: r['State'] || '', county: r['County'] || '', id: r['Location ID'] || r['ID'] || '', rate: isNaN(rate) ? null : rate / 100, rateText: r['Property tax rate'] || '',
         median: num(r['Median home price']), hospital: r['Hospital access'] || '', hospitalNote: r['Hospital note'] || '', crime: r['Crime'] || '', crimeNote: r['Crime note'] || '',
         climate: r['Climate risk'] || '', climateNote: r['Climate note'] || '', diversity: r['Diversity'] || '', diversityNote: r['Diversity note'] || '',
-        notes: r['Notes'] || '', checked: r['Last checked'] || '', sources: r['Sources'] || '' });
+        notes: r['Notes'] || '', checked: r['Last checked'] || '', sources: r['Sources'] || '',
+        row: r._row, status: String(r['Status'] || '').trim(), rejected: /^reject/i.test(String(r['Status'] || '').trim()), reason: r['Reason'] || '', rejectedOn: r['Rejected on'] || '' });
     });
     return out;
   }
   function homesInCity(c) {
     var k1 = normKey(c.name), k2 = normKey(c.id);
     return state.data.homes.filter(function (x) { var k = normKey(x.city); return k && (k === k1 || (k2 && k === k2)); });
+  }
+  // A city marked Rejected on the Cities tab hides its homes from the Housing list and Compare homes. Nothing is deleted.
+  function rejectedCity(x) {
+    var C = state.data && state.data.cities; if (!C || !x || !x.city) return null;
+    var k = normKey(x.city), hit = null;
+    C.list.forEach(function (c) { if (!hit && c.rejected && (normKey(c.name) === k || (c.id && normKey(c.id) === k))) hit = c; });
+    return hit;
+  }
+  function setCityStatus(c, rejected, reason) {
+    var head = state.data.cities.head || [], iS = head.indexOf('Status'), iR = head.indexOf('Reason'), iD = head.indexOf('Rejected on');
+    var iC = head.indexOf('City'); if (iC < 0) iC = head.indexOf('Location');
+    if (iS < 0 || iR < 0 || iC < 0 || !c.row) return Promise.reject(new Error('The Cities tab needs City, Status and Reason columns (and optionally Rejected on).'));
+    return guardCell('Cities', iC, c.row, c.name).then(function () {
+      var data = [{ range: "'Cities'!" + colLetter(iS) + c.row, values: [[rejected ? 'Rejected' : 'Considering']] },
+        { range: "'Cities'!" + colLetter(iR) + c.row, values: [[rejected ? safeText(reason) : '']] }];
+      if (iD >= 0) data.push({ range: "'Cities'!" + colLetter(iD) + c.row, values: [[rejected ? todayText() : '']] });
+      return api(homeBase() + '/values:batchUpdate', { method: 'POST', body: { valueInputOption: 'USER_ENTERED', data: data } });
+    }).then(function () {
+      c.rejected = !!rejected; c.status = rejected ? 'Rejected' : 'Considering'; c.reason = rejected ? reason : ''; c.rejectedOn = rejected ? todayText() : '';
+    });
+  }
+  function cityControl(c, homes) {
+    if (!canEditHome()) return null;
+    var k = 'city-' + c.name;
+    if (c.rejected) {
+      return h('div', { class: 'chips' }, h('button', { class: 'btn small', type: 'button', disabled: state.saving ? true : null, onclick: function () {
+        submit(k, save(setCityStatus(c, false, ''), c.name + ' is back in the running. Its homes are visible again.'));
+      } }, 'Restore ' + c.name));
+    }
+    var why = h('input', { type: 'text', maxlength: '200', placeholder: 'Why? This is shown to everyone.', 'aria-label': 'Why reject ' + c.name });
+    var planned = ((state.data.plans && state.data.plans.list) || []).filter(function (p) { return p.status === 'Planned' && homes.some(function (x) { return x.id === p.id; }); }).length;
+    return h('details', { class: 'subform' }, h('summary', null, 'Reject this city'),
+      h('div', { class: 'stack', style: 'margin-top:12px' },
+        h('p', { class: 'muted small' }, 'Its ' + homes.length + (homes.length === 1 ? ' home is' : ' homes are') + ' hidden from Housing and Compare homes, not deleted. You can restore the city at any time.' +
+          (planned ? ' ' + planned + ' planned ' + (planned === 1 ? 'tour is' : 'tours are') + ' still in Tour Plans: delete ' + (planned === 1 ? 'it' : 'them') + ' from the sheet if you no longer want to go.' : '')),
+        field('Reason (required)', why),
+        h('button', { class: 'btn small', type: 'button', style: 'align-self:flex-start', disabled: state.saving ? true : null, onclick: function () {
+          var r = why.value.trim();
+          if (!r) { toast('Add a short reason so everyone knows why.', true); return; }
+          submit(k, save(setCityStatus(c, true, r), c.name + ' rejected. Its homes are hidden.'));
+        } }, 'Reject ' + c.name)));
+  }
+  // Where a builder stands once rejected cities are set aside: 'none' (every home is in a rejected city), 'some', or '' (nothing to flag).
+  function builderCities(b) {
+    var homes = state.data.homes.filter(function (x) { return builderFor(x) === b; });
+    var out = { homes: homes, rejected: [], active: [], level: '' };
+    homes.forEach(function (x) {
+      var rc = rejectedCity(x), name = rc ? rc.name : (x.city || ''), list = rc ? out.rejected : out.active;
+      if (name && list.indexOf(name) < 0) list.push(name);
+    });
+    var nRej = homes.filter(function (x) { return !!rejectedCity(x); }).length;
+    out.level = !homes.length || !nRej ? '' : nRej === homes.length ? 'none' : 'some';
+    out.nRej = nRej;
+    return out;
   }
   function builderFor(x) {
     if (!state.data || !state.data.builders || !x || !x.builder) return null;
@@ -295,7 +351,7 @@
   }
   // Sheets hands a time back as "1:00:00 PM" (seconds) or, in some locales, "13:00:00". Accept all of them.
   function parseClock(t) {
-    var m = String(t || '').trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?$/i);
+    var m = String(t || '').replace(/\u00a0/g, ' ').trim().replace(/\s*(CT|CST|CDT|Central)\.?$/i, '').match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?$/i);
     if (!m) return null;
     var hh = +m[1], mm = +m[2];
     if (m[3]) { if (hh < 1 || hh > 12) return null; hh = (hh % 12) + (/pm/i.test(m[3]) ? 12 : 0); }
@@ -1503,7 +1559,7 @@
       h('summary', null,
         h('div', { class: 'head' }, h('h3', null, homeName(x)), h('strong', null, money(x.price))),
         h('div', { class: 'muted small' }, [x.community, x.city].filter(Boolean).join(', ')),
-        h('div', { class: 'chips' }, tagFor(x.status), x.added ? h('span', { class: 'tag' }, 'Added ' + x.added) : null, (function () { var b = builderFor(x); return b && b.vetting ? vetTag(b) : null; })(), (function () { var np = nextPlan(x.id); return np ? h('span', { class: 'tag warn' }, 'Tour planned ' + planWhen(np)) : null; })(), (function () { var m = reqSummary(x); return m ? h('span', { class: 'tag' + (m.mustFail ? ' warn' : '') }, m.yes + ' of ' + m.total + ' requirements met' + (m.no ? ', ' + m.no + ' not met' : '')) : null; })(), x.reason ? h('span', { class: 'tag' }, x.reason) : null, x.visit ? h('span', { class: 'tag' }, 'Toured ' + x.visit) : null)
+        h('div', { class: 'chips' }, tagFor(x.status), (function () { var rc = rejectedCity(x); return rc ? h('span', { class: 'tag warn', title: rc.reason || '' }, 'City rejected: ' + rc.name) : null; })(), x.added ? h('span', { class: 'tag' }, 'Added ' + x.added) : null, (function () { var b = builderFor(x); return b && b.vetting ? vetTag(b) : null; })(), (function () { var np = nextPlan(x.id); return np ? h('span', { class: 'tag warn' }, 'Tour planned ' + planWhen(np)) : null; })(), (function () { var m = reqSummary(x); return m ? h('span', { class: 'tag' + (m.mustFail ? ' warn' : '') }, m.yes + ' of ' + m.total + ' requirements met' + (m.no ? ', ' + m.no + ' not met' : '')) : null; })(), x.reason ? h('span', { class: 'tag' }, x.reason) : null, x.visit ? h('span', { class: 'tag' }, 'Toured ' + x.visit) : null)
       ),
       h('div', { class: 'body' },
         homeLinkRow(x),
@@ -1535,7 +1591,9 @@
   function viewHousing() {
     var homes = state.data.homes;
     var seen = {}, builders = {}, cities = {};
-    homes.forEach(function (x) { seen[x.status] = true; if (x.builder) builders[x.builder] = true; if (x.city) cities[x.city] = true; });
+    function hid(x) { return !state.showRejectedCities && !!rejectedCity(x); }
+    var inRejected = homes.filter(function (x) { return !!rejectedCity(x); });
+    homes.forEach(function (x) { if (hid(x)) return; seen[x.status] = true; if (x.builder) builders[x.builder] = true; if (x.city) cities[x.city] = true; });
     var statuses = ['All'].concat(Object.keys(seen).sort(function (a, b) {
       var ia = STATUS_ORDER.indexOf(a), ib = STATUS_ORDER.indexOf(b);
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
@@ -1547,7 +1605,7 @@
     function toured(x) { return !!(x.tour || x.visit); }
     // A home matches when it passes every filter; "skip" leaves one filter out so its own counts show the choices that remain.
     function match(x, skip) {
-      return (skip === 'status' || state.filter === 'All' || x.status === state.filter) &&
+      return !hid(x) && (skip === 'status' || state.filter === 'All' || x.status === state.filter) &&
         (skip === 'builder' || state.fBuilder === 'All' || x.builder === state.fBuilder) &&
         (skip === 'city' || state.fCity === 'All' || x.city === state.fCity) &&
         (skip === 'tour' || state.fTour === 'All' || (state.fTour === 'Toured') === toured(x));
@@ -1603,6 +1661,10 @@
         h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by tour' }, tourChips),
         anyFilter ? h('button', { class: 'btn ghost small', type: 'button', onclick: function () { state.filter = 'All'; state.fBuilder = 'All'; state.fCity = 'All'; state.fTour = 'All'; render(); } }, 'Clear filters') : null),
       h('p', { class: 'muted small' }, 'The status filter shows where each home stands now. A home you toured and rejected is counted under Rejected. The tour filter shows which homes have been toured, whatever their status.'),
+      inRejected.length ? h('div', { class: 'chips', style: 'align-items:center' },
+        h('button', { class: 'chip', type: 'button', 'aria-pressed': String(!!state.showRejectedCities), onclick: function () { state.showRejectedCities = !state.showRejectedCities; render(); } },
+          (state.showRejectedCities ? 'Showing ' : 'Show ') + inRejected.length + (inRejected.length === 1 ? ' home' : ' homes') + ' in rejected cities'),
+        h('span', { class: 'muted small' }, (state.showRejectedCities ? '' : 'Hidden: ') + Object.keys(inRejected.reduce(function (m, x) { m[x.city] = 1; return m; }, {})).join(', '))) : null,
       h('div', { class: 'chips' }, h('a', { class: 'btn small', href: '#/compare' }, 'Compare homes side by side'), h('a', { class: 'btn ghost small', href: '#/builders' }, 'Builders'), h('a', { class: 'btn ghost small', href: '#/cities' }, 'Cities')),
       shown.length ? h('div', { class: 'homes' }, shown.map(homeCard)) : h('p', { class: 'muted' }, 'No homes match these filters.')
     );
@@ -1691,7 +1753,7 @@
     var d = state.data, P = state.planData, items = [], names = {};
     d.homes.forEach(function (x) { names[x.id] = homeName(x); });
     d.homes.forEach(function (x) {
-      items.push({ kind: 'Homes', title: homeName(x), sub: [x.id, x.status, x.city].filter(Boolean).join(' | '), go: function () { openHome(x.id); },
+      items.push({ kind: 'Homes', title: homeName(x), sub: [x.id, x.status, x.city, rejectedCity(x) ? 'City rejected' : ''].filter(Boolean).join(' | '), go: function () { openHome(x.id); },
         fields: [['Status', x.status], ['Builder', x.builder], ['Model', x.model], ['Community', x.community], ['City', x.city], ['Address', x.address], ['Notes', x.notes],
           ['Rejected reason', x.reason], ['Contact', x.contact], ['Phone', x.phone], ['Home ID', x.id]].filter(function (f) { return f[1]; }) });
     });
@@ -1718,7 +1780,7 @@
         fields: [['Ratings', b.ratings], ['Warranty', b.warranty], ['Ask at the visit', b.ask], ['Notes', b.notes], ['Division', b.division], ['GuildQuality', b.gq]].filter(function (f) { return f[1]; }) });
     });
     ((d.cities && d.cities.list) || []).forEach(function (c) {
-      items.push({ kind: 'Cities', title: c.name + (c.state ? ', ' + c.state : ''), sub: [c.county, c.rateText ? 'Tax ' + c.rateText : ''].filter(Boolean).join(' | '), go: function () { go('cities'); },
+      items.push({ kind: 'Cities', title: c.name + (c.state ? ', ' + c.state : ''), sub: [c.county, c.rateText ? 'Tax ' + c.rateText : '', c.rejected ? 'Rejected' : ''].filter(Boolean).join(' | '), go: function () { go('cities'); },
         fields: [['Hospital', c.hospitalNote], ['Crime', c.crimeNote], ['Climate', c.climateNote], ['Diversity', c.diversityNote], ['Notes', c.notes]].filter(function (f) { return f[1]; }) });
     });
     if (P) {
@@ -1867,6 +1929,7 @@
       line('Warranty', function (b) { return b.warranty; });
       line('References', function (b) { return b.refs; });
       line('Your homes', function (b) { return state.data.homes.filter(function (x) { return builderFor(x) === b; }).map(function (x) { return homeName(x) + ' (' + x.status + ')'; }).join('; '); });
+      line('Active cities', function (b) { var c = builderCities(b); return c.level === 'none' ? h('span', { class: 'tag warn' }, 'No active cities') : c.active.join(', '); });
       line('Ask at the visit', function (b) { return b.ask; });
       line('Notes', function (b) { return b.notes; });
       line('Division', function (b) { return b.division; });
@@ -1885,18 +1948,21 @@
     var cards = shown.map(function (b) {
       var homes = state.data.homes.filter(function (x) { return builderFor(x) === b; });
       var contacts = (state.data.contacts || []).filter(function (c) { var nm = normKey(c['Builder']); return nm && (nm === normKey(b.name) || normKey(b.name).indexOf(nm) === 0 || nm.indexOf(normKey(b.name)) === 0); }).slice(0, 3);
+      var bc = builderCities(b);
       var open = state.openBuilders[b.name] !== undefined ? state.openBuilders[b.name] : (arg && normKey(b.name) === arg);
       return h('details', { class: 'card builder', 'data-builder': b.name, open: open ? true : null, ontoggle: function (e) { state.openBuilders[b.name] = e.target.open; } },
-        h('summary', null, h('div', { class: 'chips', style: 'gap:8px;align-items:center' }, h('strong', null, b.name), vetTag(b, ''), b.priority ? h('span', { class: 'tag' }, b.priority) : null),
+        h('summary', null, h('div', { class: 'chips', style: 'gap:8px;align-items:center' }, h('strong', null, b.name), vetTag(b, ''), b.priority ? h('span', { class: 'tag' }, b.priority) : null, bc.level === 'none' ? h('span', { class: 'tag warn' }, 'No active cities') : null),
           b.ratings ? h('div', { class: 'muted small' }, shortText(b.ratings, 160)) : null),
         h('div', { class: 'stack', style: 'margin-top:12px' },
+          bc.level === 'none' ? h('div', { class: 'small' }, h('strong', null, 'No active cities: '), 'all ' + bc.homes.length + (bc.homes.length === 1 ? ' home' : ' homes') + ' from this builder ' + (bc.homes.length === 1 ? 'is' : 'are') + ' in ' + bc.rejected.join(', ') + ', which you rejected. Look for this builder\'s communities in other cities, or restore the city on the Cities page.')
+            : bc.level === 'some' ? h('div', { class: 'small muted' }, bc.nRej + ' of ' + bc.homes.length + ' homes are in a rejected city (' + bc.rejected.join(', ') + '). Active: ' + bc.active.join(', ') + '.') : null,
           b.ask ? h('div', { class: 'askbox' }, h('strong', null, 'Ask at the visit'), h('div', null, b.ask)) : null,
           row('Division', b.division), row('Website', b.website && /^https:\/\//i.test(b.website) ? h('a', { href: b.website, target: '_blank', rel: 'noopener noreferrer' }, b.website) : b.website),
           row('GuildQuality', b.gq ? [b.gq, b.gqLink && /^https:\/\//i.test(b.gqLink) ? [' ', h('a', { href: b.gqLink, target: '_blank', rel: 'noopener noreferrer' }, 'Profile')] : null] : ''),
           row('Ratings', b.ratings), row('Warranty', b.warranty), row('References', b.refs), row('Notes', b.notes),
           row('Last checked', b.checked), row('Sources', b.sources),
           homes.length ? h('div', null, h('div', { class: 'muted small' }, 'Your homes from this builder'), h('div', { class: 'chips' }, homes.map(function (x) {
-            return h('button', { class: 'chip', type: 'button', onclick: function () { openHome(x.id); } }, homeName(x) + ' | ' + x.status);
+            return h('button', { class: 'chip', type: 'button', onclick: function () { openHome(x.id); } }, homeName(x) + ' | ' + x.status + (rejectedCity(x) ? ' | city rejected' : ''));
           }))) : null,
           contacts.length ? h('div', null, h('div', { class: 'muted small' }, 'Recent contacts'), h('ul', { class: 'list' }, contacts.map(function (c) {
             return h('li', null, [c['Date'], c['Contact Name'], c['Subject']].filter(Boolean).join(' | '));
@@ -1913,7 +1979,7 @@
     var head = h('div', null, h('h1', null, 'Tours'), h('p', { class: 'lede' }, 'Your planned house visits, day by day. Times are Central time. Change a plan from the home\'s card or in the Tour Plans tab of the sheet.'));
     var all = d.plans.list.filter(function (p) { return p.status === 'Planned' && p.date && homes[p.id]; }).sort(function (a, b) {
       var ca = parseClock(a.time), cb = parseClock(b.time);
-      return a.date - b.date || (ca ? ca.h * 60 + ca.m : 0) - (cb ? cb.h * 60 + cb.m : 0);
+      return a.date - b.date || (ca ? ca.h * 60 + ca.m : 9999) - (cb ? cb.h * 60 + cb.m : 9999);
     });
     if (!all.length) return h('div', { class: 'stack' }, head, h('section', { class: 'card stack' }, h('h2', null, 'No tours planned yet'),
       h('p', { class: 'muted' }, 'Open a home on the Housing page and use Plan a tour, or add rows to the Tour Plans tab of the sheet.')));
@@ -1934,7 +2000,7 @@
       if (link) actions.push(rawLink('btn ghost small', link, 'Add to Google Calendar'));
       if (canEditHome() && (d.tourHead || []).length) actions.push(rawLink('btn small', '#/tour/' + x.id, 'Log a tour'));
       return h('li', { class: 'result' },
-        h('div', { class: 'chips', style: 'gap:8px;align-items:center' }, h('strong', null, p.time ? clockText(p.time) : 'Time not set'), h('span', null, homeName(x)), statusTag(p), tagFor(x.status)),
+        h('div', { class: 'chips', style: 'gap:8px;align-items:center' }, h('strong', null, p.time ? clockText(p.time) : 'Time not set'), h('span', null, homeName(x)), statusTag(p), tagFor(x.status), rejectedCity(x) ? h('span', { class: 'tag warn' }, 'City rejected') : null),
         h('div', { class: 'muted small' }, [x.community, x.city].filter(Boolean).join(', ')),
         p.note ? h('div', { class: 'small' }, p.note) : null,
         h('div', { class: 'chips linkrow' }, actions));
@@ -1952,7 +2018,10 @@
       h('button', { class: 'btn ghost small', type: 'button', onclick: function () { try { window.print(); } catch (e) { /* ignore */ } } }, 'Print'));
     var lateCard = late.length ? h('section', { class: 'card stack' }, h('h2', null, 'Planned but not yet logged'),
       h('ul', { class: 'results' }, late.map(item))) : null;
-    return h('div', { class: 'stack' }, head, upcoming.length ? actionsTop : null, lateCard, dayCards.length ? dayCards : h('p', { class: 'muted' }, 'No upcoming tours.'));
+    var clash = all.filter(function (p) { return rejectedCity(homes[p.id]); });
+    var clashCard = clash.length ? h('section', { class: 'card stack' }, h('h2', null, 'Tours in a rejected city'),
+      h('p', { class: 'small' }, clash.length + (clash.length === 1 ? ' planned tour is' : ' planned tours are') + ' in a city you rejected. Delete ' + (clash.length === 1 ? 'it' : 'them') + ' from the Tour Plans tab, or restore the city on the Cities page.')) : null;
+    return h('div', { class: 'stack' }, head, clashCard, upcoming.length ? actionsTop : null, lateCard, dayCards.length ? dayCards : h('p', { class: 'muted' }, 'No upcoming tours.'));
   }
 
   /* ----- Cities ----- */
@@ -1968,7 +2037,8 @@
       h('p', null, 'In the home-search sheet, add a tab named "Cities" with these headers in row 1: City, State, County, Location ID, Property tax rate, Median home price, Hospital access, Hospital note, Crime, Crime note, Climate risk, Climate note, Diversity, Diversity note, Notes, Last checked, Sources.'),
       h('p', { class: 'muted' }, 'Then choose Refresh. The Retirement Research workbook has a Locations tab with the same kind of data that you can copy from.')));
     var ordered = C.list.slice().map(function (c) { var hs = homesInCity(c); return { c: c, homes: hs, open: hs.filter(function (x) { return x.status !== 'Rejected'; }).length }; }).sort(function (a, b) { return b.open - a.open || b.homes.length - a.homes.length || a.c.name.localeCompare(b.c.name); });
-    var picks = (state.compareCities || []).filter(function (n) { return C.list.some(function (c) { return c.name === n; }); });
+    var active = ordered.filter(function (o) { return !o.c.rejected; }), rejectedList = ordered.filter(function (o) { return o.c.rejected; });
+    var picks = (state.compareCities || []).filter(function (n) { return C.list.some(function (c) { return c.name === n && !c.rejected; }); });
     function togglePick(n) {
       var cur = picks.slice(), i = cur.indexOf(n);
       if (i >= 0) cur.splice(i, 1); else { if (cur.length >= 3) { toast('Compare up to three cities at a time.', true); return; } cur.push(n); }
@@ -1995,37 +2065,42 @@
       cmp = h('section', { class: 'card scroll' }, h('table', { class: 'cmp' },
         h('thead', null, h('tr', null, h('th', { scope: 'col' }, ''), chosen.map(function (o) { return h('th', { scope: 'col' }, o.c.name); }))), h('tbody', null, rows)));
     }
-    var firstPicks = ordered.filter(function (o) { return o.open; }).slice(0, 3).map(function (o) { return o.c.name; });
+    var firstPicks = active.filter(function (o) { return o.open; }).slice(0, 3).map(function (o) { return o.c.name; });
     var cmpCard = h('section', { class: 'card stack' }, h('h2', null, 'Compare cities'),
       h('p', { class: 'muted small' }, picks.length === 1 ? 'Pick one more to see them side by side.' : 'Pick two or three cities to see them side by side.'),
-      h('div', { class: 'chips', role: 'group', 'aria-label': 'Cities to compare' }, ordered.map(function (o) {
+      h('div', { class: 'chips', role: 'group', 'aria-label': 'Cities to compare' }, active.map(function (o) {
         return h('button', { class: 'chip', type: 'button', 'aria-pressed': String(picks.indexOf(o.c.name) >= 0), onclick: function () { togglePick(o.c.name); } }, o.c.name + ' (' + o.homes.length + ')');
       })),
       h('div', { class: 'chips' }, firstPicks.length >= 2 ? h('button', { class: 'btn ghost small', type: 'button', onclick: function () { state.compareCities = firstPicks; render(); } }, 'Pick the cities with the most open homes') : null,
         picks.length ? h('button', { class: 'btn ghost small', type: 'button', onclick: function () { state.compareCities = []; render(); } }, 'Clear') : null));
     function row(label, val) { return val ? h('div', { class: 'brow' }, h('div', { class: 'muted small' }, label), h('div', null, val)) : null; }
-    var cards = ordered.map(function (o) {
+    function cardFor(o) {
       var c = o.c, counts = {};
       o.homes.forEach(function (x) { counts[x.status] = (counts[x.status] || 0) + 1; });
       var summary = Object.keys(counts).map(function (k) { return counts[k] + ' ' + k; }).join(', ');
-      return h('details', { class: 'card builder', 'data-city': c.name },
+      return h('details', { class: 'card builder' + (c.rejected ? ' muted-card' : ''), 'data-city': c.name },
         h('summary', null, h('div', { class: 'chips', style: 'gap:8px;align-items:center' }, h('strong', null, c.name + (c.state ? ', ' + c.state : '')), h('span', { class: 'tag' }, o.homes.length + (o.homes.length === 1 ? ' home' : ' homes'))),
           h('div', { class: 'muted small' }, [c.rateText ? 'Tax ' + c.rateText : '', c.median !== null ? 'Median ' + money(c.median) : '', summary].filter(Boolean).join(' | '))),
         h('div', { class: 'stack', style: 'margin-top:12px' },
-          row('County', c.county), row('Property tax rate', c.rateText), row('Median home price', c.median === null ? '' : money(c.median)),
+          c.rejected ? h('div', { class: 'small' }, h('strong', null, 'Rejected' + (c.rejectedOn ? ' on ' + c.rejectedOn : '') + ': '), c.reason || 'No reason recorded.') : null,
+          cityControl(c, o.homes), row('County', c.county), row('Property tax rate', c.rateText), row('Median home price', c.median === null ? '' : money(c.median)),
           row('Hospital access', c.hospital ? [cityLevelTag(c.hospital), ' ', c.hospitalNote] : c.hospitalNote), row('Crime', c.crime ? [cityLevelTag(c.crime), ' ', c.crimeNote] : c.crimeNote),
           row('Climate risk', c.climate ? [cityLevelTag(c.climate), ' ', c.climateNote] : c.climateNote), row('Diversity', c.diversity ? [c.diversity, ' ', c.diversityNote] : c.diversityNote),
           row('Notes', c.notes), row('Last checked', c.checked), row('Sources', c.sources),
           o.homes.length ? h('div', null, h('div', { class: 'muted small' }, 'Your homes here'), h('div', { class: 'chips' }, o.homes.map(function (x) {
             return h('button', { class: 'chip', type: 'button', onclick: function () { openHome(x.id); } }, homeName(x) + ' | ' + x.status);
           }))) : null));
-    });
-    return h('div', { class: 'stack' }, head, cmpCard, cmp, cards);
+    }
+    var cards = active.map(cardFor);
+    var rejectedSection = rejectedList.length ? h('details', { class: 'card stack', 'data-rejected-cities': '1' },
+      h('summary', null, h('strong', null, 'Rejected cities (' + rejectedList.length + ')'), ' ', h('span', { class: 'muted small' }, rejectedList.map(function (o) { return o.c.name; }).join(', '))),
+      h('div', { class: 'stack', style: 'margin-top:12px' }, rejectedList.map(cardFor))) : null;
+    return h('div', { class: 'stack' }, head, cmpCard, cmp, cards, rejectedSection);
   }
 
   /* ----- Compare ----- */
   function viewCompare() {
-    var d = state.data, homes = d.homes.slice();
+    var d = state.data, homes = d.homes.filter(function (x) { return state.showRejectedCities || !rejectedCity(x); });
     var head = pageHead('Compare homes', 'Pick up to six homes and see them side by side. Active homes are chosen to start.');
     if (!homes.length) return h('div', { class: 'stack' }, head, h('p', { class: 'muted' }, 'No homes yet.'));
     var ids = state.compareIds;

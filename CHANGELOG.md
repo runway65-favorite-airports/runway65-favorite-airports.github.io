@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.34.1
+
+- Builders page: a builder whose homes are all in rejected cities shows a No active cities tag and a note on its card. A builder with some homes in rejected cities shows how many. Compare builders gains an Active cities row.
+
+## 0.34.0
+
+- Reject a city. Add Status, Reason and Rejected on columns to the Cities tab. A city marked Rejected is collapsed into a Rejected cities section on the Cities page, left out of Compare cities, and its homes are hidden from Housing and Compare homes. A Show homes in rejected cities button on Housing brings them back. Nothing is deleted. Editors can reject (with a required reason) or restore a city from its card.
+- Homes in a rejected city carry a City rejected tag. The Tours page warns about any planned tour in a rejected city. Search labels rejected cities and their homes.
+
+## 0.33.1
+
+- Tours page: a time with a trailing "CT" is now read correctly, and a tour whose time cannot be read sorts last instead of first.
+
 ## 0.33.0
 - New: a Tours page in the top menu (after Housing). It lists every planned tour day by day with the time, home, status (Requested, Planned or Confirmed, as typed in the Tour Plans tab), notes and the buttons you need on the road: Open home, Directions, Call, Add to Google Calendar and Log a tour. Tours whose date has passed and that are not yet logged appear in their own list. A button downloads the whole plan as one calendar file, and another prints it.
 - Tour times are now treated as Central time (Tennessee) in the Google Calendar buttons and the calendar files, so they show at the right hour even if your calendar is set to Eastern.
