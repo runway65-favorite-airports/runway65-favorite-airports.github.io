@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.34.2
+
+- Builders, Cities and Compare homes now start with a row of links (Housing, Builders, Cities, Compare homes) so you can move between them in one tap. The current page is highlighted.
+
 ## 0.34.1
 
 - Builders page: a builder whose homes are all in rejected cities shows a No active cities tag and a note on its card. A builder with some homes in rejected cities shows how many. Compare builders gains an Active cities row.
