@@ -227,3 +227,8 @@ details.builder[open]>summary::after{top:12px;transform:rotate(-135deg)}
 /* v0.30.0: links row */
 .linkrow{margin-bottom:4px}
 .linkrow a{text-decoration:none}
+
+/* v0.32.0: cities reuse the builder card styles */
+
+.muted-card { opacity: .8; }
+#tour-search{font:inherit;font-size:16px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-height:44px;flex:1 1 220px;min-width:0}
