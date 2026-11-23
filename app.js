@@ -1,4 +1,4 @@
-/* Runway v0.34.2.
+/* Runway v0.35.0.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.34.2';
+  var APP_VERSION = '0.35.0';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var DRAFT_KEY = 'runway.tourdrafts'; // half-finished tours, kept on this device only
@@ -25,7 +25,7 @@
     token: null, expires: 0, user: null, sheet: loadStore(HOME_KEY), plan: loadStore(PLAN_KEY),
     role: null, planRole: null, data: null, planData: null, planError: null,
     loadedAt: null, busy: false, error: null, saving: false, notice: null, drafts: loadDrafts(), openForms: {}, tourRoom: {}, routeArg: '',
-    route: 'overview', openHomes: {}, openReq: {}, compareIds: null, compareDiff: false, filter: 'All', fBuilder: 'All', fCity: 'All', fTour: 'All', query: '', compareCities: [], showRejectedCities: false, sortHomes: 'az', beforeSearch: '', lastRoute: '', scrollTo: '', scrollBuilder: '', openBuilders: {}, fVet: 'All', compareBuilders: [], taskStream: 'All', showDone: false, needSignIn: true
+    route: 'overview', openHomes: {}, openReq: {}, compareIds: null, compareDiff: false, filter: 'All', fBuilder: 'All', fCity: 'All', fTour: 'All', tourQuery: '', tourStatus: 'All', query: '', compareCities: [], showRejectedCities: false, sortHomes: 'az', beforeSearch: '', lastRoute: '', scrollTo: '', scrollBuilder: '', openBuilders: {}, fVet: 'All', compareBuilders: [], taskStream: 'All', showDone: false, needSignIn: true
   };
 
   var app = document.getElementById('app');
@@ -1992,7 +1992,11 @@
     });
     if (!all.length) return h('div', { class: 'stack' }, head, h('section', { class: 'card stack' }, h('h2', null, 'No tours planned yet'),
       h('p', { class: 'muted' }, 'Open a home on the Housing page and use Plan a tour, or add rows to the Tour Plans tab of the sheet.')));
-    var late = all.filter(function (p) { return p.date < today; }), upcoming = all.filter(function (p) { return p.date >= today; });
+    function skey(p) { var r = String(p.rawStatus || '').toLowerCase(); return r === 'confirmed' ? 'Confirmed' : r === 'requested' ? 'Requested' : 'Planned'; }
+    var sf = state.tourStatus || 'All';
+    function pass(p) { return sf === 'All' || skey(p) === sf; }
+    var upcomingAll = all.filter(function (p) { return p.date >= today; });
+    var late = all.filter(function (p) { return p.date < today && pass(p); }), upcoming = upcomingAll.filter(pass);
     var days = [], byDay = {};
     upcoming.forEach(function (p) { var k = p.dateText; if (!byDay[k]) { byDay[k] = { date: p.date, items: [] }; days.push(byDay[k]); } byDay[k].items.push(p); });
     function statusTag(p) {
@@ -2008,7 +2012,8 @@
       if (/^\+?[0-9]{7,15}$/.test(digits)) actions.push(rawLink('btn ghost small', 'tel:' + digits, 'Call' + (x.contact ? ' ' + x.contact.split(/\s+/)[0] : '')));
       if (link) actions.push(rawLink('btn ghost small', link, 'Add to Google Calendar'));
       if (canEditHome() && (d.tourHead || []).length) actions.push(rawLink('btn small', '#/tour/' + x.id, 'Log a tour'));
-      return h('li', { class: 'result' },
+      var hay = [homeName(x), x.builder, x.model, x.community, x.city, x.contact, x.address, x.salesAddr, p.note, p.time, skey(p)].filter(Boolean).join(' ').toLowerCase();
+      return h('li', { class: 'result tour-item', 'data-q': hay },
         h('div', { class: 'chips', style: 'gap:8px;align-items:center' }, h('strong', null, p.time ? clockText(p.time) : 'Time not set'), h('span', null, homeName(x)), statusTag(p), tagFor(x.status), rejectedCity(x) ? h('span', { class: 'tag warn' }, 'City rejected') : null),
         h('div', { class: 'muted small' }, [x.community, x.city].filter(Boolean).join(', ')),
         p.note ? h('div', { class: 'small' }, p.note) : null,
@@ -2017,20 +2022,52 @@
     var dayCards = days.map(function (dd) {
       var cities = []; dd.items.forEach(function (p) { var c = homes[p.id].city; if (c && cities.indexOf(c) < 0) cities.push(c); });
       var label = dd.date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-      return h('section', { class: 'card stack' }, h('h2', null, label), h('p', { class: 'muted small' }, dd.items.length + (dd.items.length === 1 ? ' tour' : ' tours') + (cities.length ? ' | ' + cities.join(', ') : '')),
+      return h('section', { class: 'card stack tour-day' }, h('h2', null, label), h('p', { class: 'muted small' }, dd.items.length + (dd.items.length === 1 ? ' tour' : ' tours') + (cities.length ? ' | ' + cities.join(', ') : '')),
         h('ul', { class: 'results' }, dd.items.map(item)));
     });
     var actionsTop = h('div', { class: 'chips' },
       h('button', { class: 'btn small', type: 'button', onclick: function () {
-        var ev = []; upcoming.forEach(function (p) { ev = ev.concat(icsEvent(homes[p.id], p)); }); saveIcs(ev, 'runway-tours.ics');
+        var ev = []; upcomingAll.forEach(function (p) { ev = ev.concat(icsEvent(homes[p.id], p)); }); saveIcs(ev, 'runway-tours.ics');
       } }, 'Download all as a calendar file (.ics)'),
       h('button', { class: 'btn ghost small', type: 'button', onclick: function () { try { window.print(); } catch (e) { /* ignore */ } } }, 'Print'));
-    var lateCard = late.length ? h('section', { class: 'card stack' }, h('h2', null, 'Planned but not yet logged'),
+    var lateCard = late.length ? h('section', { class: 'card stack tour-day' }, h('h2', null, 'Planned but not yet logged'),
       h('ul', { class: 'results' }, late.map(item))) : null;
     var clash = all.filter(function (p) { return rejectedCity(homes[p.id]); });
     var clashCard = clash.length ? h('section', { class: 'card stack' }, h('h2', null, 'Tours in a rejected city'),
       h('p', { class: 'small' }, clash.length + (clash.length === 1 ? ' planned tour is' : ' planned tours are') + ' in a city you rejected. Delete ' + (clash.length === 1 ? 'it' : 'them') + ' from the Tour Plans tab, or restore the city on the Cities page.')) : null;
-    return h('div', { class: 'stack' }, head, clashCard, upcoming.length ? actionsTop : null, lateCard, dayCards.length ? dayCards : h('p', { class: 'muted' }, 'No upcoming tours.'));
+    var counts = { All: all.length, Confirmed: 0, Requested: 0, Planned: 0 };
+    all.forEach(function (p) { counts[skey(p)] += 1; });
+    var input = h('input', { type: 'search', id: 'tour-search', maxlength: '80', placeholder: 'Search by builder, model, community, city or contact', 'aria-label': 'Search tours', autocomplete: 'off', value: state.tourQuery || '' });
+    var clearBtn = h('button', { class: 'btn ghost small', type: 'button' }, 'Clear');
+    var tally = h('p', { class: 'muted small', role: 'status' });
+    var noMatch = h('p', { class: 'muted', role: 'status', style: 'display:none' }, 'No tours match. ');
+    var noLink = h('button', { class: 'btn ghost small', type: 'button' }, 'Clear search and filters');
+    noMatch.append(noLink);
+    var statusChips = h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by status' }, ['All', 'Confirmed', 'Requested', 'Planned'].map(function (n) {
+      return h('button', { class: 'chip', type: 'button', 'aria-pressed': String(sf === n), onclick: function () { state.tourStatus = n; render(); } }, n + ' (' + counts[n] + ')');
+    }));
+    var filterCard = h('section', { class: 'card stack' }, h('label', { for: 'tour-search', class: 'small' }, 'Search tours'), h('div', { class: 'chips', style: 'gap:8px;align-items:center' }, input, clearBtn), statusChips, tally);
+    var root = h('div', { class: 'stack' }, head, clashCard, filterCard, upcoming.length ? actionsTop : null, lateCard, dayCards, noMatch);
+    function applyQ() {
+      var terms = String(state.tourQuery || '').toLowerCase().split(/\s+/).filter(Boolean), shown = 0, total = 0;
+      Array.prototype.forEach.call(root.querySelectorAll('.tour-item'), function (li) {
+        var q = li.getAttribute('data-q') || '', ok = terms.every(function (t) { return q.indexOf(t) >= 0; });
+        li.style.display = ok ? '' : 'none'; total += 1; if (ok) shown += 1;
+      });
+      Array.prototype.forEach.call(root.querySelectorAll('.tour-day'), function (card) {
+        var any = Array.prototype.some.call(card.querySelectorAll('.tour-item'), function (li) { return li.style.display !== 'none'; });
+        card.style.display = any ? '' : 'none';
+      });
+      var filtering = terms.length || sf !== 'All';
+      tally.textContent = filtering ? 'Showing ' + shown + ' of ' + all.length + (all.length === 1 ? ' tour' : ' tours') + '.' : '';
+      noMatch.style.display = filtering && !shown ? '' : 'none';
+      clearBtn.style.display = state.tourQuery ? '' : 'none';
+    }
+    input.addEventListener('input', function () { state.tourQuery = input.value; applyQ(); });
+    clearBtn.addEventListener('click', function () { state.tourQuery = ''; input.value = ''; applyQ(); input.focus(); });
+    noLink.addEventListener('click', function () { state.tourQuery = ''; state.tourStatus = 'All'; render(); });
+    applyQ();
+    return root;
   }
 
   /* ----- Cities ----- */
@@ -2475,6 +2512,7 @@
   function render() {
     readRoute();
     if (state.lastRoute === 'search' && state.route !== 'search') state.query = '';
+    if (state.lastRoute === 'tours' && state.route !== 'tours') { state.tourQuery = ''; state.tourStatus = 'All'; }
     state.lastRoute = state.route;
     var y = window.scrollY || 0;
     app.replaceChildren(
