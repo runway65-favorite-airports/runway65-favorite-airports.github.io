@@ -1,4 +1,4 @@
-/* Runway v0.34.1.
+/* Runway v0.34.2.
    - Signs in with Google (token flow, token kept in memory only).
    - Opens the sheets the person picks (drive.file scope): the home-search sheet and the Runway planning sheet.
    - Shows Overview, Tasks, Decisions, Housing, a side-by-side Compare view, Requirements, Chronology, Journal and Documents.
@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.34.1';
+  var APP_VERSION = '0.34.2';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var DRAFT_KEY = 'runway.tourdrafts'; // half-finished tours, kept on this device only
@@ -921,6 +921,14 @@
       var ok = x.protocol === 'https:' && ((x.hostname === 'docs.google.com' && x.pathname.indexOf('/forms/') === 0) || x.hostname === 'forms.gle');
       return ok ? x.href : null;
     } catch (e) { return null; }
+  }
+  // Links between the Housing page and its companions, so each is one tap from the others.
+  function subnav(head, cur) {
+    var items = [['housing', 'Housing'], ['builders', 'Builders'], ['cities', 'Cities'], ['compare', 'Compare homes']];
+    head.appendChild(h('nav', { class: 'chips subnav', 'aria-label': 'Housing pages', style: 'margin-top:10px' }, items.map(function (it) {
+      return h('a', { class: 'btn small' + (it[0] === cur ? '' : ' ghost'), href: '#/' + it[0], 'aria-current': it[0] === cur ? 'page' : null }, it[1]);
+    })));
+    return head;
   }
   function pageHead(title, lede) { return h('div', null, h('h1', null, title), lede ? h('p', { class: 'lede' }, lede) : null); }
   function planProblem() {
@@ -1897,6 +1905,7 @@
   function priorityRank(b) { var m = String(b.priority || '').match(/^\s*(\d)/); return m ? +m[1] : 9; }
   function viewBuilders() {
     var head = h('div', null, h('h1', null, 'Builders'), h('p', { class: 'lede' }, 'What you know about each builder: reputation, warranty, references, and what to ask at the visit. Read from the Builders tab in the home-search sheet.'));
+    head = subnav(head, 'builders');
     var B = state.data.builders;
     if (!B || !B.has) return h('div', { class: 'stack' }, head, h('section', { class: 'card stack' }, h('h2', null, 'Add a Builders tab'),
       h('p', null, 'In the home-search sheet, add a tab named "Builders" with these headers in row 1: Builder, Division, Website, GuildQuality, GuildQuality link, Other ratings, Warranty, References, Vetting status, Notes, Last checked, Sources, Ask at the visit, Trip priority.'),
@@ -2032,6 +2041,7 @@
   }
   function viewCities() {
     var head = h('div', null, h('h1', null, 'Cities'), h('p', { class: 'lede' }, 'Compare the places your homes are in: tax, hospitals, crime, weather and more, from the Cities tab in the home-search sheet.'));
+    head = subnav(head, 'cities');
     var C = state.data.cities;
     if (!C || !C.has) return h('div', { class: 'stack' }, head, h('section', { class: 'card stack' }, h('h2', null, 'Add a Cities tab'),
       h('p', null, 'In the home-search sheet, add a tab named "Cities" with these headers in row 1: City, State, County, Location ID, Property tax rate, Median home price, Hospital access, Hospital note, Crime, Crime note, Climate risk, Climate note, Diversity, Diversity note, Notes, Last checked, Sources.'),
@@ -2101,7 +2111,7 @@
   /* ----- Compare ----- */
   function viewCompare() {
     var d = state.data, homes = d.homes.filter(function (x) { return state.showRejectedCities || !rejectedCity(x); });
-    var head = pageHead('Compare homes', 'Pick up to six homes and see them side by side. Active homes are chosen to start.');
+    var head = subnav(pageHead('Compare homes', 'Pick up to six homes and see them side by side. Active homes are chosen to start.'), 'compare');
     if (!homes.length) return h('div', { class: 'stack' }, head, h('p', { class: 'muted' }, 'No homes yet.'));
     var ids = state.compareIds;
     if (!ids) { ids = homes.filter(function (x) { return x.status === 'Active'; }).map(function (x) { return x.id; }).slice(0, 6); state.compareIds = ids; }
