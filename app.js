@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = '0.35.0';
+  var APP_VERSION = '0.35.1';
   var C = window.RUNWAY_CONFIG;
   var SCOPES = 'openid email profile https://www.googleapis.com/auth/drive.file';
   var DRAFT_KEY = 'runway.tourdrafts'; // half-finished tours, kept on this device only
@@ -2506,7 +2506,7 @@
       h('a', { href: 'privacy.html' }, 'Privacy policy'));
     var note = state.notice ? h('div', { class: 'notice', role: 'status' }, h('span', null, state.notice),
       h('button', { class: 'btn ghost small', type: 'button', onclick: function () { state.notice = null; render(); } }, 'Dismiss')) : null;
-    return h('div', null, banner, top, state.data ? searchBar() : null, note, h('main', null, content), foot);
+    return h('div', null, banner, state.data ? searchBar() : null, top, note, h('main', null, content), foot);
   }
 
   function render() {

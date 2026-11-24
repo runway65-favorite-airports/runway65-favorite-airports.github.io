@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.35.1
+
+- Layout: the search box and Ask Claude button now sit at the very top of the page, above the navigation bar.
+
 ## 0.35.0
 
 - Tours page: a search box finds tours by builder, model, community, city, contact name or note, and filters as you type. Status chips (All, Confirmed, Requested, Planned) show a count and narrow the list. The search and chip filters work together, and a Showing n of N line and a Clear button appear while a filter is on. The rejected-city warning always stays visible, and the .ics download still includes every upcoming tour. The filters reset when you leave the page.

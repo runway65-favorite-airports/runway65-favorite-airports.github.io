@@ -232,3 +232,6 @@ details.builder[open]>summary::after{top:12px;transform:rotate(-135deg)}
 
 .muted-card { opacity: .8; }
 #tour-search{font:inherit;font-size:16px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-height:44px;flex:1 1 220px;min-width:0}
+
+/* v0.35.1: search and Ask Claude bar sits above the header */
+.searchbar{margin:0 auto;padding:10px 24px;border-bottom:1px solid var(--line);background:var(--card)}
