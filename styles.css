@@ -235,3 +235,6 @@ details.builder[open]>summary::after{top:12px;transform:rotate(-135deg)}
 
 /* v0.35.1: search and Ask Claude bar sits above the header */
 .searchbar{margin:0 auto;padding:10px 24px;border-bottom:1px solid var(--line);background:var(--card)}
+
+/* v0.35.2: pin the search bar while scrolling */
+.searchbar{position:sticky;top:0;z-index:20}

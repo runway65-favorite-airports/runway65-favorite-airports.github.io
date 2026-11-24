@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.35.2
+
+- Layout: the search box and Ask Claude bar stays pinned to the top of the screen while you scroll.
+
 ## 0.35.1
 
 - Layout: the search box and Ask Claude button now sit at the very top of the page, above the navigation bar.
