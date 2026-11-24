@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.35.3
+
+- Layout: the search box and Ask Claude bar is back below the navigation bar. It still stays pinned to the top of the screen once you scroll past the navigation.
+
 ## 0.35.2
 
 - Layout: the search box and Ask Claude bar stays pinned to the top of the screen while you scroll.
